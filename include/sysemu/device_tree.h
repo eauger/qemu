@@ -20,6 +20,20 @@ void *load_device_tree(const char *filename_path, int *sizep);
 void *load_device_tree_from_sysfs(void);
 #endif
 
+/**
+ * qemu_fdt_node_path: return the paths of nodes matching a given
+ * name and compat string
+ * @fdt: pointer to the dt blob
+ * @name: node name
+ * @compat: compatibility string
+ * @errp: handle to an error object
+ *
+ * returns a newly allocated NULL-terminated array of node paths.
+ * Use g_strfreev() to free it.
+ */
+char **qemu_fdt_node_path(void *fdt, const char *name, char *compat,
+                          Error **errp);
+
 int qemu_fdt_setprop(void *fdt, const char *node_path,
                      const char *property, const void *val, int size);
 int qemu_fdt_setprop_cell(void *fdt, const char *node_path,
