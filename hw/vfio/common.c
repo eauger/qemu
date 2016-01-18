@@ -208,6 +208,36 @@ static int vfio_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
+/**
+ * vfio_register_reserved_iova: registers the iova reserved region
+ *
+ * @container: container handle
+ * @iova: base iova of the reserved region
+ * @size: reserved region size
+ *
+ * unregistration is handled using vfio_dma_unmap
+ */
+int vfio_register_reserved_iova(VFIOContainer *container, hwaddr iova,
+                                ram_addr_t size);
+int vfio_register_reserved_iova(VFIOContainer *container, hwaddr iova,
+                                ram_addr_t size)
+{
+    struct vfio_iommu_type1_dma_map map = {
+        .argsz = sizeof(map),
+        .flags = VFIO_DMA_MAP_FLAG_MSI_RESERVED_IOVA,
+        .iova = iova,
+        .size = size,
+    };
+
+    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0) {
+        return 0;
+    }
+
+    error_report("VFIO_MAP_DMA/MSI_RESERVED_IOVA: %d", -errno);
+    return -errno;
+
+}
+
 static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
