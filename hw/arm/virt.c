@@ -125,6 +125,7 @@ static const MemMapEntry a15memmap[] = {
     [VIRT_GPIO] =               { 0x09030000, 0x00001000 },
     [VIRT_SECURE_UART] =        { 0x09040000, 0x00001000 },
     [VIRT_MMIO] =               { 0x0a000000, 0x00000200 },
+    [VIRT_RESERVED] =           { 0x0be00000, 0x00100000 },
     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
     [VIRT_PCIE_MMIO] =          { 0x10000000, 0x2eff0000 },
@@ -815,6 +816,8 @@ static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
     hwaddr size_pio = vbi->memmap[VIRT_PCIE_PIO].size;
     hwaddr base_ecam = vbi->memmap[VIRT_PCIE_ECAM].base;
     hwaddr size_ecam = vbi->memmap[VIRT_PCIE_ECAM].size;
+    hwaddr base_reserved = vbi->memmap[VIRT_RESERVED].base;
+    hwaddr size_reserved = vbi->memmap[VIRT_RESERVED].size;
     hwaddr base = base_mmio;
     int nr_pcie_buses = size_ecam / PCIE_MMCFG_SIZE_MIN;
     int irq = vbi->irqmap[VIRT_PCIE];
@@ -822,6 +825,7 @@ static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
     MemoryRegion *mmio_reg;
     MemoryRegion *ecam_alias;
     MemoryRegion *ecam_reg;
+    MemoryRegion *reserved_reg;
     DeviceState *dev;
     char *nodename;
     int i;
@@ -837,6 +841,12 @@ static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
     memory_region_init_alias(ecam_alias, OBJECT(dev), "pcie-ecam",
                              ecam_reg, 0, size_ecam);
     memory_region_add_subregion(get_system_memory(), base_ecam, ecam_alias);
+
+    reserved_reg = g_new0(MemoryRegion, 1);
+    memory_region_init_reserved_iova(reserved_reg, OBJECT(dev), "reserved-iova",
+                       size_reserved, &error_fatal);
+    memory_region_add_subregion(get_system_memory(), base_reserved,
+                                reserved_reg);
 
     /* Map the MMIO window into system address space so as to expose
      * the section of PCI MMIO space which starts at the same base address

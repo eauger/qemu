@@ -61,6 +61,7 @@ enum {
     VIRT_PCIE_MMIO_HIGH,
     VIRT_GPIO,
     VIRT_SECURE_UART,
+    VIRT_RESERVED,
 };
 
 typedef struct MemMapEntry {
