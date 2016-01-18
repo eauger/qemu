@@ -805,7 +805,7 @@ static void create_pcie_irq_map(const VirtBoardInfo *vbi, uint32_t gic_phandle,
 }
 
 static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
-                        bool use_highmem)
+                        bool use_highmem, MemoryRegion **reserved_reg)
 {
     hwaddr base_mmio = vbi->memmap[VIRT_PCIE_MMIO].base;
     hwaddr size_mmio = vbi->memmap[VIRT_PCIE_MMIO].size;
@@ -920,10 +920,16 @@ static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
     qemu_fdt_setprop_cell(vbi->fdt, nodename, "#interrupt-cells", 1);
     create_pcie_irq_map(vbi, vbi->gic_phandle, irq, nodename);
 
+    /* initialize the reserved iova region for MSI binding (16 x 64kb) */
+    *reserved_reg = g_new0(MemoryRegion, 1);
+    memory_region_init_reserved_iova(*reserved_reg, OBJECT(dev),
+                                     "reserved-iova",
+                                     0x100000, &error_fatal);
+
     g_free(nodename);
 }
 
-static void create_platform_bus(VirtBoardInfo *vbi, qemu_irq *pic)
+static PlatformBusDevice *create_platform_bus(VirtBoardInfo *vbi, qemu_irq *pic)
 {
     DeviceState *dev;
     SysBusDevice *s;
@@ -962,6 +968,7 @@ static void create_platform_bus(VirtBoardInfo *vbi, qemu_irq *pic)
     memory_region_add_subregion(sysmem,
                                 platform_bus_params.platform_bus_base,
                                 sysbus_mmio_get_region(s, 0));
+    return PLATFORM_BUS_DEVICE(dev);
 }
 
 static void *machvirt_dtb(const struct arm_boot_info *binfo, int *fdt_size)
@@ -1015,7 +1022,7 @@ static void machvirt_init(MachineState *machine)
     VirtMachineState *vms = VIRT_MACHINE(machine);
     qemu_irq pic[NUM_IRQS];
     MemoryRegion *sysmem = get_system_memory();
-    MemoryRegion *secure_sysmem = NULL;
+    MemoryRegion *secure_sysmem = NULL, *reserved_reg;
     int gic_version = vms->gic_version;
     int n, max_cpus;
     MemoryRegion *ram = g_new(MemoryRegion, 1);
@@ -1024,6 +1031,7 @@ static void machvirt_init(MachineState *machine)
     VirtGuestInfoState *guest_info_state = g_malloc0(sizeof *guest_info_state);
     VirtGuestInfo *guest_info = &guest_info_state->info;
     char **cpustr;
+    PlatformBusDevice *pbus;
 
     if (!cpu_model) {
         cpu_model = "cortex-a15";
@@ -1161,7 +1169,7 @@ static void machvirt_init(MachineState *machine)
 
     create_rtc(vbi, pic);
 
-    create_pcie(vbi, pic, vms->highmem);
+    create_pcie(vbi, pic, vms->highmem, &reserved_reg);
 
     create_gpio(vbi, pic);
 
@@ -1200,7 +1208,8 @@ static void machvirt_init(MachineState *machine)
      * another notifier is registered which adds platform bus nodes.
      * Notifiers are executed in registration reverse order.
      */
-    create_platform_bus(vbi, pic);
+    pbus = create_platform_bus(vbi, pic);
+    platform_bus_map_region(pbus, reserved_reg);
 }
 
 static bool virt_get_secure(Object *obj, Error **errp)
