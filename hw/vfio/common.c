@@ -217,10 +217,8 @@ static int vfio_dma_unmap(VFIOContainer *container,
  *
  * unregistration is handled using vfio_dma_unmap
  */
-int vfio_register_reserved_iova(VFIOContainer *container, hwaddr iova,
-                                ram_addr_t size);
-int vfio_register_reserved_iova(VFIOContainer *container, hwaddr iova,
-                                ram_addr_t size)
+static int vfio_register_reserved_iova(VFIOContainer *container, hwaddr iova,
+                                       ram_addr_t size)
 {
     struct vfio_iommu_type1_dma_map map = {
         .argsz = sizeof(map),
@@ -271,6 +269,7 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
 static bool vfio_listener_skipped_section(MemoryRegionSection *section)
 {
     return (!memory_region_is_ram(section->mr) &&
+            !memory_region_is_reserved_iova(section->mr) &&
             !memory_region_is_iommu(section->mr)) ||
            /*
             * Sizing an enabled 64-bit BAR can cause spurious mappings to
@@ -354,7 +353,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
     hwaddr iova, end;
     Int128 llend;
     void *vaddr;
-    int ret;
+    int ret = -1;
 
     if (vfio_listener_skipped_section(section)) {
         trace_vfio_listener_region_add_skip(
@@ -418,23 +417,34 @@ static void vfio_listener_region_add(MemoryListener *listener,
         return;
     }
 
-    /* Here we assume that memory_region_is_ram(section->mr)==true */
+    /* Here we assume that the memory region is ram or reserved iova */
 
-    vaddr = memory_region_get_ram_ptr(section->mr) +
-            section->offset_within_region +
-            (iova - section->offset_within_address_space);
+    if (memory_region_is_ram(section->mr)) {
+        vaddr = memory_region_get_ram_ptr(section->mr) +
+                section->offset_within_region +
+                (iova - section->offset_within_address_space);
 
-    trace_vfio_listener_region_add_ram(iova, end - 1, vaddr);
+        trace_vfio_listener_region_add_ram(iova, end - 1, vaddr);
 
-    ret = vfio_dma_map(container, iova, end - iova, vaddr, section->readonly);
-    if (ret) {
-        error_report("vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
-                     "0x%"HWADDR_PRIx", %p) = %d (%m)",
-                     container, iova, end - iova, vaddr, ret);
-        goto fail;
+        ret = vfio_dma_map(container, iova, end - iova, vaddr,
+                           section->readonly);
+        if (ret) {
+            error_report("vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
+                         "0x%"HWADDR_PRIx", %p) = %d (%m)",
+                         container, iova, end - iova, vaddr, ret);
+            goto fail;
+        }
+        return;
+    } else if (memory_region_is_reserved_iova(section->mr)) {
+        ret = vfio_register_reserved_iova(container, iova, end - iova);
+        if (ret) {
+            error_report("vfio_register_reserved_iova(%p, 0x%"HWADDR_PRIx", "
+                         "0x%"HWADDR_PRIx") = %d (%m)",
+                         container, iova, end - iova, ret);
+            goto fail;
+        }
+        return;
     }
-
-    return;
 
 fail:
     /*
