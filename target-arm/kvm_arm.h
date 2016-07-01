@@ -223,7 +223,21 @@ static inline const char *gic_class_name(void)
  *
  * Returns: class name to use
  */
-const char *gicv3_class_name(void);
+static inline const char *gicv3_class_name(void)
+{
+    if (kvm_irqchip_in_kernel()) {
+#ifdef TARGET_AARCH64
+        return "kvm-arm-gicv3";
+#else
+        error_report("KVM GICv3 acceleration is not supported on this "
+                     "platform");
+#endif
+    } else {
+        return "arm-gicv3";
+    }
+
+    exit(1);
+}
 
 /**
  * kvm_arm_handle_debug:
