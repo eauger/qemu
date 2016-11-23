@@ -65,6 +65,8 @@
     KVM_DEV_ARM_VGIC_SYSREG(3, 0, 12, 12, 3)
 #define ICC_CTLR_EL1    \
     KVM_DEV_ARM_VGIC_SYSREG(3, 0, 12, 12, 4)
+#define ICC_SRE_EL1 \
+    KVM_DEV_ARM_VGIC_SYSREG(3, 0, 12, 12, 5)
 #define ICC_IGRPEN0_EL1 \
     KVM_DEV_ARM_VGIC_SYSREG(3, 0, 12, 12, 6)
 #define ICC_IGRPEN1_EL1 \
@@ -404,6 +406,7 @@ static void kvm_arm_gicv3_put(GICv3State *s)
         GICv3CPUState *c = &s->cpu[ncpu];
         int num_pri_bits;
 
+        kvm_gicc_access(s, ICC_SRE_EL1, ncpu, &c->icc_sre_el1, true);
         kvm_gicc_access(s, ICC_CTLR_EL1, ncpu,
                         &c->icc_ctlr_el1[GICV3_NS], true);
         kvm_gicc_access(s, ICC_IGRPEN0_EL1, ncpu,
@@ -557,6 +560,7 @@ static void kvm_arm_gicv3_get(GICv3State *s)
         GICv3CPUState *c = &s->cpu[ncpu];
         int num_pri_bits;
 
+        kvm_gicc_access(s, ICC_SRE_EL1, ncpu, &c->icc_sre_el1, false);
         kvm_gicc_access(s, ICC_CTLR_EL1, ncpu,
                         &c->icc_ctlr_el1[GICV3_NS], false);
         kvm_gicc_access(s, ICC_IGRPEN0_EL1, ncpu,
