@@ -30,6 +30,7 @@
 #include "hw/loader.h"
 #endif
 #include "hw/arm/arm.h"
+#include "hw/arm/linux-boot-if.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
 #include "kvm_arm.h"
@@ -112,6 +113,21 @@ static void cp_reg_check_reset(gpointer key, gpointer value,  gpointer opaque)
     newvalue = read_raw_cp_reg(&cpu->env, ri);
     assert(oldvalue == newvalue);
 }
+
+static int do_arm_device_reset(Object *obj, void *opaque)
+{
+    if (object_dynamic_cast(obj, TYPE_ARM_DEVICE_RESET_IF)) {
+        ARMDeviceResetIf *adrif = ARM_DEVICE_RESET_IF(obj);
+        ARMDeviceResetIfClass *adrifc = ARM_DEVICE_RESET_IF_GET_CLASS(obj);
+        CPUState *cpu = opaque;
+
+        if (adrifc->arm_device_reset) {
+            adrifc->arm_device_reset(adrif, cpu->cpu_index);
+        }
+    }
+    return 0;
+}
+
 
 /* CPUClass::reset() */
 static void arm_cpu_reset(CPUState *s)
@@ -228,6 +244,8 @@ static void arm_cpu_reset(CPUState *s)
                               &env->vfp.standard_fp_status);
     tlb_flush(s, 1);
 
+    object_child_foreach_recursive(object_get_root(),
+                                   do_arm_device_reset, s);
 #ifndef CONFIG_USER_ONLY
     if (kvm_enabled()) {
         kvm_arm_reset_vcpu(cpu);
@@ -1594,6 +1612,19 @@ static void cpu_register(const ARMCPUInfo *info)
     type_register(&type_info);
     g_free((void *)type_info.name);
 }
+
+static const TypeInfo arm_device_reset_if_info = {
+    .name = TYPE_ARM_DEVICE_RESET_IF,
+    .parent = TYPE_INTERFACE,
+    .class_size = sizeof(ARMDeviceResetIfClass),
+};
+
+static void arm_device_reset_register_types(void)
+{
+    type_register_static(&arm_device_reset_if_info);
+}
+
+type_init(arm_device_reset_register_types)
 
 static const TypeInfo arm_cpu_type_info = {
     .name = TYPE_ARM_CPU,

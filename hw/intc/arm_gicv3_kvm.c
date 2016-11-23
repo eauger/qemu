@@ -29,6 +29,7 @@
 #include "gicv3_internal.h"
 #include "vgic_common.h"
 #include "migration/migration.h"
+#include "hw/arm/linux-boot-if.h"
 
 #ifdef DEBUG_GICV3_KVM
 #define DPRINTF(fmt, ...) \
@@ -604,6 +605,36 @@ static void kvm_arm_gicv3_get(GICv3State *s)
     }
 }
 
+static void  arm_gicv3_reset_cpuif(ARMDeviceResetIf *obj,
+                                      unsigned int cpu_num)
+{
+    GICv3CPUState *c;
+    GICv3State *s = ARM_GICV3_COMMON(obj);
+
+    if (!s && !s->cpu) {
+        return;
+    }
+
+    c = &s->cpu[cpu_num];
+    if (!c) {
+        return;
+    }
+
+    /* Initialize to actual HW supported configuration */
+    kvm_gicc_access(s, ICC_CTLR_EL1, cpu_num,
+                    &c->icc_ctlr_el1[GICV3_NS], false);
+
+    c->icc_ctlr_el1[GICV3_S] = c->icc_ctlr_el1[GICV3_NS];
+    c->icc_pmr_el1 = 0;
+    c->icc_bpr[GICV3_G0] = GIC_MIN_BPR;
+    c->icc_bpr[GICV3_G1] = GIC_MIN_BPR;
+    c->icc_bpr[GICV3_G1NS] = GIC_MIN_BPR;
+
+    c->icc_sre_el1 = 0x7;
+    memset(c->icc_apr, 0, sizeof(c->icc_apr));
+    memset(c->icc_igrpen, 0, sizeof(c->icc_igrpen));
+}
+
 static void kvm_arm_gicv3_reset(DeviceState *dev)
 {
     GICv3State *s = ARM_GICV3_COMMON(dev);
@@ -688,6 +719,7 @@ static void kvm_arm_gicv3_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_CLASS(klass);
     KVMARMGICv3Class *kgc = KVM_ARM_GICV3_CLASS(klass);
+    ARMDeviceResetIfClass *adrifc = ARM_DEVICE_RESET_IF_CLASS(klass);
 
     agcc->pre_save = kvm_arm_gicv3_get;
     agcc->post_load = kvm_arm_gicv3_put;
@@ -695,6 +727,7 @@ static void kvm_arm_gicv3_class_init(ObjectClass *klass, void *data)
     kgc->parent_reset = dc->reset;
     dc->realize = kvm_arm_gicv3_realize;
     dc->reset = kvm_arm_gicv3_reset;
+    adrifc->arm_device_reset = arm_gicv3_reset_cpuif;
 }
 
 static const TypeInfo kvm_arm_gicv3_info = {
@@ -703,6 +736,10 @@ static const TypeInfo kvm_arm_gicv3_info = {
     .instance_size = sizeof(GICv3State),
     .class_init = kvm_arm_gicv3_class_init,
     .class_size = sizeof(KVMARMGICv3Class),
+    .interfaces = (InterfaceInfo []) {
+        { TYPE_ARM_DEVICE_RESET_IF },
+        { },
+    },
 };
 
 static void kvm_arm_gicv3_register_types(void)
