@@ -108,7 +108,7 @@ static inline void kvm_gicr_access(GICv3State *s, int offset, int cpu,
 static inline void kvm_gicc_access(GICv3State *s, uint64_t reg, int cpu,
                                    uint64_t *val, bool write)
 {
-    kvm_device_access(s->dev_fd, KVM_DEV_ARM_VGIC_GRP_CPU_SYSREGS,
+    kvm_device_access(s->dev_fd, KVM_DEV_ARM_VGIC_CPU_SYSREGS,
                       KVM_VGIC_ATTR(reg, s->cpu[cpu].gicr_typer),
                       val, write);
 }
