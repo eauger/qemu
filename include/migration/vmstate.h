@@ -188,6 +188,8 @@ enum VMStateFlags {
 
 typedef enum {
     MIG_PRI_DEFAULT = 0,
+    MIG_PRI_GICV3_ITS,
+    MIG_PRI_GICV3,
     MIG_PRI_MAX,
 } MigrationPriority;
 

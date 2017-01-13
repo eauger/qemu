@@ -95,8 +95,12 @@ static void kvm_arm_its_realize(DeviceState *dev, Error **errp)
      * Block migration of a KVM GICv3 ITS device: the API for saving and
      * restoring the state in the kernel is not yet available
      */
-    error_setg(&s->migration_blocker, "vITS migration is not implemented");
-    migrate_add_blocker(s->migration_blocker);
+    if (!kvm_device_check_attr(s->dev_fd, KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
+                               GITS_CTLR)) {
+        error_setg(&s->migration_blocker, "This operating system kernel does "
+                                          "not support vITS migration");
+        migrate_add_blocker(s->migration_blocker);
+    }
 
     kvm_msi_use_devid = true;
     kvm_gsi_direct_mapping = false;
