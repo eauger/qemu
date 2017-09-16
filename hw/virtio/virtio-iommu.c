@@ -95,8 +95,73 @@ static gint interval_cmp(gconstpointer a, gconstpointer b, gpointer user_data)
     }
 }
 
+static void virtio_iommu_notify_map(IOMMUMemoryRegion *mr, hwaddr iova,
+                                    hwaddr paddr, hwaddr size)
+{
+    IOMMUTLBEntry entry;
+
+    entry.target_as = &address_space_memory;
+    entry.addr_mask = size - 1;
+
+    entry.iova = iova;
+    trace_virtio_iommu_notify_map(mr->parent_obj.name, iova, paddr, size);
+    entry.perm = IOMMU_RW;
+    entry.translated_addr = paddr;
+
+    memory_region_notify_iommu(mr, entry);
+}
+
+static void virtio_iommu_notify_unmap(IOMMUMemoryRegion *mr, hwaddr iova,
+                                      hwaddr paddr, hwaddr size)
+{
+    IOMMUTLBEntry entry;
+
+    entry.target_as = &address_space_memory;
+    entry.addr_mask = size - 1;
+
+    entry.iova = iova;
+    trace_virtio_iommu_notify_unmap(mr->parent_obj.name, iova, paddr, size);
+    entry.perm = IOMMU_NONE;
+    entry.translated_addr = 0;
+
+    memory_region_notify_iommu(mr, entry);
+}
+
+static gboolean virtio_iommu_mapping_unmap(gpointer key, gpointer value,
+                                         gpointer data)
+{
+    viommu_mapping *mapping = (viommu_mapping *) value;
+    IOMMUMemoryRegion *mr = (IOMMUMemoryRegion *) data;
+
+    virtio_iommu_notify_unmap(mr, mapping->virt_addr, 0, mapping->size);
+
+    return false;
+}
+
+static gboolean virtio_iommu_mapping_map(gpointer key, gpointer value,
+                                          gpointer data)
+{
+    viommu_mapping *mapping = (viommu_mapping *) value;
+    IOMMUMemoryRegion *mr = (IOMMUMemoryRegion *) data;
+
+    virtio_iommu_notify_map(mr, mapping->virt_addr, mapping->phys_addr,
+                            mapping->size);
+
+    return false;
+}
+
 static void virtio_iommu_detach_dev_from_as(viommu_dev *dev)
 {
+    VirtioIOMMUNotifierNode *node;
+    VirtIOIOMMU *s = dev->viommu;
+    viommu_as *as = dev->as;
+
+    QLIST_FOREACH(node, &s->notifiers_list, next) {
+        if (dev->id == node->iommu_dev->devfn) {
+            g_tree_foreach(as->mappings, virtio_iommu_mapping_unmap,
+                           &node->iommu_dev->iommu_mr);
+        }
+    }
     QLIST_REMOVE(dev, next);
     dev->as = NULL;
 }
@@ -123,10 +188,11 @@ static viommu_dev *virtio_iommu_get_dev(VirtIOIOMMU *s, uint32_t devid)
 static void virtio_iommu_put_dev(gpointer data)
 {
     viommu_dev *dev = (viommu_dev *)data;
+    viommu_as *as = dev->as;
 
-    if (dev->as) {
+    if (as) {
         virtio_iommu_detach_dev_from_as(dev);
-        g_tree_unref(dev->as->mappings);
+        g_tree_unref(as->mappings);
     }
 
     trace_virtio_iommu_put_dev(dev->id);
@@ -228,6 +294,7 @@ static int virtio_iommu_attach(VirtIOIOMMU *s,
     uint32_t asid = le32_to_cpu(req->address_space);
     uint32_t devid = le32_to_cpu(req->device);
     uint32_t reserved = le32_to_cpu(req->reserved);
+    VirtioIOMMUNotifierNode *node;
     viommu_as *as;
     viommu_dev *dev;
 
@@ -251,6 +318,14 @@ static int virtio_iommu_attach(VirtIOIOMMU *s,
 
     dev->as = as;
     g_tree_ref(as->mappings);
+
+    /* replay existing address space mappings on the associated mr */
+    QLIST_FOREACH(node, &s->notifiers_list, next) {
+        if (devid == node->iommu_dev->devfn) {
+            g_tree_foreach(as->mappings, virtio_iommu_mapping_map,
+                           &node->iommu_dev->iommu_mr);
+        }
+    }
 
     return VIRTIO_IOMMU_S_OK;
 }
@@ -291,6 +366,8 @@ static int virtio_iommu_map(VirtIOIOMMU *s,
     viommu_as *as;
     viommu_interval *interval;
     viommu_mapping *mapping;
+    VirtioIOMMUNotifierNode *node;
+    viommu_dev *dev;
 
     interval = g_malloc0(sizeof(*interval));
 
@@ -318,7 +395,35 @@ static int virtio_iommu_map(VirtIOIOMMU *s,
 
     g_tree_insert(as->mappings, interval, mapping);
 
+    /* All devices in an address-space share mapping */
+    QLIST_FOREACH(node, &s->notifiers_list, next) {
+        QLIST_FOREACH(dev, &as->device_list, next) {
+            if (dev->id == node->iommu_dev->devfn) {
+                virtio_iommu_notify_map(&node->iommu_dev->iommu_mr,
+                                        virt_addr, phys_addr, size);
+            }
+        }
+    }
+
     return VIRTIO_IOMMU_S_OK;
+}
+
+static void virtio_iommu_remove_mapping(VirtIOIOMMU *s, viommu_as *as,
+                                        viommu_interval *interval)
+{
+    VirtioIOMMUNotifierNode *node;
+    viommu_dev *dev;
+
+    g_tree_remove(as->mappings, (gpointer)(interval));
+    QLIST_FOREACH(node, &s->notifiers_list, next) {
+        QLIST_FOREACH(dev, &as->device_list, next) {
+            if (dev->id == node->iommu_dev->devfn) {
+                virtio_iommu_notify_unmap(&node->iommu_dev->iommu_mr,
+                                          interval->low, 0,
+                                          interval->high - interval->low + 1);
+            }
+        }
+    }
 }
 
 static int virtio_iommu_unmap(VirtIOIOMMU *s,
@@ -352,18 +457,18 @@ static int virtio_iommu_unmap(VirtIOIOMMU *s,
         current.high = high;
 
         if (low == interval.low && size >= mapping->size) {
-            g_tree_remove(as->mappings, (gpointer)(&current));
+            virtio_iommu_remove_mapping(s, as, &current);
             interval.low = high + 1;
             trace_virtio_iommu_unmap_left_interval(current.low, current.high,
                 interval.low, interval.high);
         } else if (high == interval.high && size >= mapping->size) {
             trace_virtio_iommu_unmap_right_interval(current.low, current.high,
                 interval.low, interval.high);
-            g_tree_remove(as->mappings, (gpointer)(&current));
+            virtio_iommu_remove_mapping(s, as, &current);
             interval.high = low - 1;
         } else if (low > interval.low && high < interval.high) {
             trace_virtio_iommu_unmap_inc_interval(current.low, current.high);
-            g_tree_remove(as->mappings, (gpointer)(&current));
+            virtio_iommu_remove_mapping(s, as, &current);
         } else {
             break;
         }
@@ -659,6 +764,36 @@ push:
     }
 }
 
+static void virtio_iommu_notify_flag_changed(IOMMUMemoryRegion *iommu_mr,
+                                          IOMMUNotifierFlag old,
+                                          IOMMUNotifierFlag new)
+{
+    IOMMUDevice *sdev = container_of(iommu_mr, IOMMUDevice, iommu_mr);
+    VirtIOIOMMU *s = sdev->viommu;
+    VirtioIOMMUNotifierNode *node = NULL;
+    VirtioIOMMUNotifierNode *next_node = NULL;
+
+    if (old == IOMMU_NOTIFIER_NONE) {
+        trace_virtio_iommu_notify_flag_add(iommu_mr->parent_obj.name);
+        node = g_malloc0(sizeof(*node));
+        node->iommu_dev = sdev;
+        QLIST_INSERT_HEAD(&s->notifiers_list, node, next);
+        return;
+    }
+
+    /* update notifier node with new flags */
+    QLIST_FOREACH_SAFE(node, &s->notifiers_list, next, next_node) {
+        if (node->iommu_dev == sdev) {
+            if (new == IOMMU_NOTIFIER_NONE) {
+                trace_virtio_iommu_notify_flag_del(iommu_mr->parent_obj.name);
+                QLIST_REMOVE(node, next);
+                g_free(node);
+            }
+            return;
+        }
+    }
+}
+
 static IOMMUTLBEntry virtio_iommu_translate(IOMMUMemoryRegion *mr, hwaddr addr,
                                             IOMMUAccessFlags flag)
 {
@@ -801,11 +936,49 @@ static gint int_cmp(gconstpointer a, gconstpointer b, gpointer user_data)
     return (ua > ub) - (ua < ub);
 }
 
+static gboolean virtio_iommu_remap(gpointer key, gpointer value, gpointer data)
+{
+    viommu_mapping *mapping = (viommu_mapping *) value;
+    IOMMUMemoryRegion *mr = (IOMMUMemoryRegion *) data;
+
+    trace_virtio_iommu_remap(mapping->virt_addr, mapping->phys_addr,
+                             mapping->size);
+    /* unmap previous entry and map again */
+    virtio_iommu_notify_unmap(mr, mapping->virt_addr, 0, mapping->size);
+
+    virtio_iommu_notify_map(mr, mapping->virt_addr, mapping->phys_addr,
+                            mapping->size);
+    return false;
+}
+
+static void virtio_iommu_replay(IOMMUMemoryRegion *mr, IOMMUNotifier *n)
+{
+    IOMMUDevice *sdev = container_of(mr, IOMMUDevice, iommu_mr);
+    VirtIOIOMMU *s = sdev->viommu;
+    uint32_t sid;
+    viommu_dev *dev;
+
+    sid = virtio_iommu_get_sid(sdev);
+
+    qemu_mutex_lock(&s->mutex);
+
+    dev = g_tree_lookup(s->devices, GUINT_TO_POINTER(sid));
+    if (!dev || !dev->as) {
+        goto unlock;
+    }
+
+    g_tree_foreach(dev->as->mappings, virtio_iommu_remap, mr);
+
+unlock:
+    qemu_mutex_unlock(&s->mutex);
+}
+
 static void virtio_iommu_device_realize(DeviceState *dev, Error **errp)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
     VirtIOIOMMU *s = VIRTIO_IOMMU(dev);
 
+    QLIST_INIT(&s->notifiers_list);
     virtio_init(vdev, "virtio-iommu", VIRTIO_ID_IOMMU,
                 sizeof(struct virtio_iommu_config));
 
@@ -897,6 +1070,8 @@ static void virtio_iommu_memory_region_class_init(ObjectClass *klass,
 
     imrc->translate = virtio_iommu_translate;
     imrc->set_page_size_mask = virtio_iommu_set_page_size_mask;
+    imrc->notify_flag_changed = virtio_iommu_notify_flag_changed;
+    imrc->replay = virtio_iommu_replay;
 }
 
 static const TypeInfo virtio_iommu_info = {
