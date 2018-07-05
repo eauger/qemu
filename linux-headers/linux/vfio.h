@@ -14,6 +14,7 @@
 
 #include <linux/types.h>
 #include <linux/ioctl.h>
+#include <linux/iommu.h>
 
 #define VFIO_API_VERSION	0
 
@@ -664,6 +665,53 @@ struct vfio_iommu_type1_dma_unmap {
  */
 #define VFIO_IOMMU_ENABLE	_IO(VFIO_TYPE, VFIO_BASE + 15)
 #define VFIO_IOMMU_DISABLE	_IO(VFIO_TYPE, VFIO_BASE + 16)
+
+struct vfio_iommu_type1_bind_pasid_table {
+	__u32	argsz;
+	__u32	flags;
+	struct iommu_pasid_table_config config;
+};
+#define VFIO_IOMMU_BIND_PASID_TABLE	_IO(VFIO_TYPE, VFIO_BASE + 22)
+
+struct vfio_iommu_type1_cache_invalidate {
+	__u32   argsz;
+	__u32   flags;
+	struct iommu_cache_invalidate_info info;
+};
+#define VFIO_IOMMU_CACHE_INVALIDATE      _IO(VFIO_TYPE, VFIO_BASE + 23)
+
+struct vfio_iommu_type1_bind_guest_msi {
+	__u32   argsz;
+	__u32   flags;
+	struct iommu_guest_msi_binding binding;
+};
+#define VFIO_IOMMU_BIND_MSI      _IO(VFIO_TYPE, VFIO_BASE + 24)
+
+struct vfio_iommu_type1_guest_fault_config {
+#define VFIO_IOMMU_FAULT_UNRECOVERABLE	(1 << 0)
+	__u32	flags;
+	union {
+		__u8	qs; /* queue size, log2(entries) */
+	};
+};
+
+struct vfio_iommu_type1_set_fault_eventfd {
+	__u32   argsz;
+	__u32   flags;
+	__u32   eventfd;
+	struct vfio_iommu_type1_guest_fault_config config;
+};
+#define VFIO_IOMMU_SET_FAULT_EVENTFD      _IO(VFIO_TYPE, VFIO_BASE + 25)
+
+struct vfio_iommu_type1_get_fault_events {
+	__u32	argsz;
+	__u32   flags;
+	__u32	count; /* number of faults returned */
+	__u32   reserved;
+	struct iommu_fault events[];
+};
+
+#define VFIO_IOMMU_GET_FAULT_EVENTS	_IO(VFIO_TYPE, VFIO_BASE + 26)
 
 /* -------- Additional API for SPAPR TCE (Server POWERPC) IOMMU -------- */
 
