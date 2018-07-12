@@ -20,7 +20,6 @@ typedef struct VirtIOIOMMUPCI VirtIOIOMMUPCI;
  * virtio-iommu-pci: This extends VirtioPCIProxy.
  *
  */
-#define TYPE_VIRTIO_IOMMU_PCI "virtio-iommu-pci"
 #define VIRTIO_IOMMU_PCI(obj) \
         OBJECT_CHECK(VirtIOIOMMUPCI, (obj), TYPE_VIRTIO_IOMMU_PCI)
 
