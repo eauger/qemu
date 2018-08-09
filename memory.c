@@ -1811,7 +1811,7 @@ void memory_region_register_iommu_notifier(MemoryRegion *mr,
     /* We need to register for at least one bitfield */
     iommu_mr = IOMMU_MEMORY_REGION(mr);
     assert(n->notifier_flags != IOMMU_NOTIFIER_NONE);
-    assert(n->start <= n->end);
+    assert(n->iotlb_notifier.start <= n->iotlb_notifier.end);
     assert(n->iommu_idx >= 0 &&
            n->iommu_idx < memory_region_iommu_num_indexes(iommu_mr));
 
@@ -1847,7 +1847,7 @@ void memory_region_iommu_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n)
     for (addr = 0; addr < memory_region_size(mr); addr += granularity) {
         iotlb = imrc->translate(iommu_mr, addr, IOMMU_NONE, n->iommu_idx);
         if (iotlb.perm != IOMMU_NONE) {
-            n->notify(n, &iotlb);
+            n->iotlb_notifier.notify(n, &iotlb);
         }
 
         /* if (2^64 - MR size) < granularity, it's possible to get an
@@ -1890,8 +1890,8 @@ void memory_region_notify_one(IOMMUNotifier *notifier,
      * Skip the notification if the notification does not overlap
      * with registered range.
      */
-    if (notifier->start > entry->iova + entry->addr_mask ||
-        notifier->end < entry->iova) {
+    if (notifier->iotlb_notifier.start > entry->iova + entry->addr_mask ||
+        notifier->iotlb_notifier.end < entry->iova) {
         return;
     }
 
@@ -1902,7 +1902,7 @@ void memory_region_notify_one(IOMMUNotifier *notifier,
     }
 
     if (notifier->notifier_flags & request_flags) {
-        notifier->notify(notifier, entry);
+        notifier->iotlb_notifier.notify(notifier, entry);
     }
 }
 
