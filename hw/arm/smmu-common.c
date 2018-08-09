@@ -391,9 +391,9 @@ static void smmu_unmap_notifier_range(IOMMUNotifier *n)
     IOMMUTLBEntry entry;
 
     entry.target_as = &address_space_memory;
-    entry.iova = n->start;
+    entry.iova = n->iotlb_notifier.start;
     entry.perm = IOMMU_NONE;
-    entry.addr_mask = n->end - n->start;
+    entry.addr_mask = n->iotlb_notifier.end - n->iotlb_notifier.start;
 
     memory_region_notify_one(n, &entry);
 }
