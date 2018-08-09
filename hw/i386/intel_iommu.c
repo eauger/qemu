@@ -3343,8 +3343,8 @@ static void vtd_address_space_unmap(VTDAddressSpace *as, IOMMUNotifier *n)
 {
     IOMMUTLBEntry entry;
     hwaddr size;
-    hwaddr start = n->start;
-    hwaddr end = n->end;
+    hwaddr start = n->iotlb_notifier.start;
+    hwaddr end = n->iotlb_notifier.end;
     IntelIOMMUState *s = as->iommu_state;
     DMAMap map;
 
@@ -3380,7 +3380,7 @@ static void vtd_address_space_unmap(VTDAddressSpace *as, IOMMUNotifier *n)
 
     entry.target_as = &address_space_memory;
     /* Adjust iova for the size */
-    entry.iova = n->start & ~(size - 1);
+    entry.iova = n->iotlb_notifier.start & ~(size - 1);
     /* This field is meaningless for unmap */
     entry.translated_addr = 0;
     entry.perm = IOMMU_NONE;
