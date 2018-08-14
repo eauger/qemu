@@ -408,6 +408,26 @@ static void vfio_iommu_unmap_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     }
 }
 
+static void vfio_iommu_msi_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
+{
+    VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
+    VFIOContainer *container = giommu->container;
+    struct vfio_iommu_type1_bind_guest_msi ustruct;
+    int ret;
+
+    ustruct.argsz = sizeof(struct vfio_iommu_type1_bind_guest_msi);
+    ustruct.flags = 0;
+    ustruct.binding.iova = iotlb->iova;
+    ustruct.binding.gpa = iotlb->translated_addr;
+    ustruct.binding.granule = ctz64(~iotlb->addr_mask);
+
+    ret = ioctl(container->fd, VFIO_IOMMU_BIND_MSI , &ustruct);
+    if (ret) {
+        error_report("%s: failed to pass MSI binding (%d)",
+                     __func__, ret);
+    }
+}
+
 static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
@@ -738,6 +758,15 @@ static void vfio_listener_region_add(MemoryListener *listener,
             giommu = vfio_alloc_guest_iommu(container, iommu_mr, offset);
             iommu_iotlb_notifier_init(&giommu->n, vfio_iommu_unmap_notify,
                                       IOMMU_NOTIFIER_UNMAP,
+                                      section->offset_within_region,
+                                      int128_get64(llend),
+                                      iommu_idx);
+            QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
+            memory_region_register_iommu_notifier(section->mr, &giommu->n);
+
+            giommu = vfio_alloc_guest_iommu(container, iommu_mr, offset);
+            iommu_iotlb_notifier_init(&giommu->n, vfio_iommu_msi_map_notify,
+                                      IOMMU_NOTIFIER_MAP,
                                       section->offset_within_region,
                                       int128_get64(llend),
                                       iommu_idx);
