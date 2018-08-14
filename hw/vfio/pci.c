@@ -589,6 +589,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
     if (vdev->nr_vectors < nr + 1) {
         vfio_disable_irqindex(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX);
         vdev->nr_vectors = nr + 1;
+        vfio_add_kvm_msi_virq(vdev, vector, nr, true);
         ret = vfio_enable_vectors(vdev, true);
         if (ret) {
             error_report("vfio: failed to enable vectors, %d", ret);
