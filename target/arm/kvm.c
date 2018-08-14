@@ -732,41 +732,35 @@ int kvm_arch_fixup_msi_route(struct kvm_irq_routing_entry *route,
                              uint64_t address, uint32_t data, PCIDevice *dev)
 {
     AddressSpace *as = pci_device_iommu_address_space(dev);
-    hwaddr xlat, len, doorbell_gpa;
-    MemoryRegionSection mrs;
-    MemoryRegion *mr;
-    int ret = 1;
+    IOMMUMemoryRegionClass *imrc;
+    IOMMUMemoryRegion *iommu_mr;
+    IOMMUTLBEntry entry;
 
     if (as == &address_space_memory) {
         return 0;
     }
 
+    iommu_mr = IOMMU_MEMORY_REGION(as->root);
+    imrc = memory_region_get_iommu_class_nocheck(iommu_mr);
+
     /* MSI doorbell address is translated by an IOMMU */
 
     rcu_read_lock();
-    mr = address_space_translate(as, address, &xlat, &len, true,
-                                 MEMTXATTRS_UNSPECIFIED);
-    if (!mr) {
-        goto unlock;
-    }
-    mrs = memory_region_find(mr, xlat, 1);
-    if (!mrs.mr) {
-        goto unlock;
-    }
-
-    doorbell_gpa = mrs.offset_within_address_space;
-    memory_region_unref(mrs.mr);
-
-    route->u.msi.address_lo = doorbell_gpa;
-    route->u.msi.address_hi = doorbell_gpa >> 32;
-
-    trace_kvm_arm_fixup_msi_route(address, doorbell_gpa);
-
-    ret = 0;
-
-unlock:
+    entry = imrc->translate(iommu_mr, address, IOMMU_WO, 0);
     rcu_read_unlock();
-    return ret;
+
+    if (entry.perm == IOMMU_NONE) {
+        return -ENOENT;
+    }
+
+    route->u.msi.address_lo = entry.translated_addr;
+    route->u.msi.address_hi = entry.translated_addr >> 32;
+
+    memory_region_iotlb_notify_iommu(iommu_mr, 0, entry);
+
+    trace_kvm_arm_fixup_msi_route(address, entry.translated_addr);
+
+    return 0;
 }
 
 int kvm_arch_add_msi_route_post(struct kvm_irq_routing_entry *route,
