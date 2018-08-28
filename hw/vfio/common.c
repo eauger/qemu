@@ -1038,13 +1038,18 @@ static void vfio_put_address_space(VFIOAddressSpace *space)
 
 /*
  * vfio_iommu_get_type - selects the richest iommu_type (v2 first)
+ * nested only is selected if requested by @force_nested
  */
 static int vfio_iommu_get_type(VFIOContainer *container,
-                               Error **errp)
+                               bool force_nested, Error **errp)
 {
     int fd = container->fd;
 
-    if (ioctl(fd, VFIO_CHECK_EXTENSION, VFIO_TYPE1v2_IOMMU)) {
+    if (force_nested &&
+        ioctl(fd, VFIO_CHECK_EXTENSION, VFIO_TYPE1_NESTING_IOMMU)) {
+        /* NESTED implies v2 */
+        return VFIO_TYPE1_NESTING_IOMMU;
+    } else if (ioctl(fd, VFIO_CHECK_EXTENSION, VFIO_TYPE1v2_IOMMU)) {
         return VFIO_TYPE1v2_IOMMU;
     } else if (ioctl(fd, VFIO_CHECK_EXTENSION, VFIO_TYPE1_IOMMU)) {
         return VFIO_TYPE1_IOMMU;
@@ -1084,9 +1089,16 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     VFIOContainer *container;
     int ret, fd;
     VFIOAddressSpace *space;
+    IOMMUMemoryRegion *iommu_mr;
     int iommu_type;
+    bool force_nested = false;
     bool v2 = false;
 
+    if (as != &address_space_memory && memory_region_is_iommu(as->root)) {
+        iommu_mr = IOMMU_MEMORY_REGION(as->root);
+        memory_region_iommu_get_attr(iommu_mr, IOMMU_ATTR_VFIO_NESTED,
+                                     (void *)&force_nested);
+    }
 
     space = vfio_get_address_space(as);
 
@@ -1147,12 +1159,18 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
 
-    iommu_type = vfio_iommu_get_type(container, errp);
+    iommu_type = vfio_iommu_get_type(container, force_nested, errp);
     if (iommu_type < 0) {
             goto free_container_exit;
     }
 
+    if (force_nested && iommu_type != VFIO_TYPE1_NESTING_IOMMU) {
+            error_setg(errp, "nested mode requested by the virtual IOMMU "
+                       "but not supported by the vfio iommu");
+    }
+
     switch (iommu_type) {
+    case VFIO_TYPE1_NESTING_IOMMU:
     case VFIO_TYPE1v2_IOMMU:
     case VFIO_TYPE1_IOMMU:
     {
