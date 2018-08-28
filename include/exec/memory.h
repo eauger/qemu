@@ -26,6 +26,9 @@
 #include "qom/object.h"
 #include "qemu/rcu.h"
 #include "hw/qdev-core.h"
+#ifdef CONFIG_LINUX
+#include <linux/iommu.h>
+#endif
 
 #define RAM_ADDR_INVALID (~(ram_addr_t)0)
 
@@ -74,6 +77,14 @@ struct IOMMUTLBEntry {
     IOMMUAccessFlags perm;
 };
 
+typedef struct IOMMUConfig {
+    union {
+#ifdef __linux__
+        struct iommu_pasid_table_config pasid_cfg;
+#endif
+          };
+} IOMMUConfig;
+
 /*
  * Bitmap for different IOMMUNotifier capabilities. Each notifier can
  * register with one or multiple IOMMU Notifier capability bit(s).
@@ -84,13 +95,19 @@ typedef enum {
     IOMMU_NOTIFIER_UNMAP = 0x1,
     /* Notify entry changes (newly created entries) */
     IOMMU_NOTIFIER_MAP = 0x2,
+    /* Notify stage 1 config changes */
+    IOMMU_NOTIFIER_PASID_CFG = 0x4,
 } IOMMUNotifierFlag;
 
 #define IOMMU_NOTIFIER_IOTLB_ALL (IOMMU_NOTIFIER_MAP | IOMMU_NOTIFIER_UNMAP)
+#define IOMMU_NOTIFIER_CONFIG_ALL (IOMMU_NOTIFIER_PASID_CFG)
 
 struct IOMMUNotifier;
+struct IOMMUConfig;
 typedef void (*IOMMUNotify)(struct IOMMUNotifier *notifier,
                             IOMMUTLBEntry *data);
+typedef void (*IOMMUConfigNotify)(struct IOMMUNotifier *notifier,
+                                  IOMMUConfig *cfg);
 
 typedef struct IOMMUIOLTBNotifier {
     IOMMUNotify notify;
@@ -99,9 +116,16 @@ typedef struct IOMMUIOLTBNotifier {
     hwaddr end;
 } IOMMUIOLTBNotifier;
 
+typedef struct IOMMUConfigNotifier {
+    IOMMUConfigNotify notify;
+} IOMMUConfigNotifier;
+
 struct IOMMUNotifier {
     IOMMUNotifierFlag notifier_flags;
-    IOMMUIOLTBNotifier iotlb_notifier;
+    union {
+        IOMMUIOLTBNotifier iotlb_notifier;
+        IOMMUConfigNotifier config_notifier;
+    };
     int iommu_idx;
     QLIST_ENTRY(IOMMUNotifier) node;
 };
@@ -141,6 +165,16 @@ static inline void iommu_iotlb_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
     n->iotlb_notifier.start = start;
     n->iotlb_notifier.end = end;
     n->iommu_idx = iommu_idx;
+}
+
+static inline void iommu_config_notifier_init(IOMMUNotifier *n,
+                                              IOMMUConfigNotify fn,
+                                              IOMMUNotifierFlag flags,
+                                              int iommu_idx)
+{
+    n->notifier_flags = flags;
+    n->iommu_idx = iommu_idx;
+    n->config_notifier.notify = fn;
 }
 
 /*
@@ -637,6 +671,17 @@ void memory_region_init_resizeable_ram(MemoryRegion *mr,
                                                        uint64_t length,
                                                        void *host),
                                        Error **errp);
+
+static inline bool is_iommu_iotlb_notifier(IOMMUNotifier *n)
+{
+    return n->notifier_flags & IOMMU_NOTIFIER_IOTLB_ALL;
+}
+
+static inline bool is_iommu_config_notifier(IOMMUNotifier *n)
+{
+    return n->notifier_flags & IOMMU_NOTIFIER_CONFIG_ALL;
+}
+
 #ifdef CONFIG_POSIX
 
 /**
@@ -1044,6 +1089,19 @@ void memory_region_iotlb_notify_iommu(IOMMUMemoryRegion *iommu_mr,
                                       IOMMUTLBEntry entry);
 
 /**
+ * memory_region_config_notify_iommu: notify a change in a translation
+ * configuration structure.
+ * @iommu_mr: the memory region that was changed
+ * @iommu_idx: the IOMMU index for the translation table which has changed
+ * @flag: config change type
+ * @config: new guest config
+ */
+void memory_region_config_notify_iommu(IOMMUMemoryRegion *iommu_mr,
+                                       int iommu_idx,
+                                       IOMMUNotifierFlag flag,
+                                       IOMMUConfig *config);
+
+/**
  * memory_region_iotlb_notify_one: notify a change in an IOMMU translation
  *                                 entry to a single notifier
  *
@@ -1060,7 +1118,7 @@ void memory_region_iotlb_notify_one(IOMMUNotifier *notifier,
 
 /**
  * memory_region_register_iommu_notifier: register a notifier for changes to
- * IOMMU translation entries.
+ * IOMMU translation entries or translation config settings.
  *
  * @mr: the memory region to observe
  * @n: the IOMMUNotifier to be added; the notify callback receives a
