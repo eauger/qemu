@@ -395,7 +395,7 @@ static void smmu_unmap_notifier_range(IOMMUNotifier *n)
     entry.perm = IOMMU_NONE;
     entry.addr_mask = n->iotlb_notifier.end - n->iotlb_notifier.start;
 
-    memory_region_notify_one(n, &entry);
+    memory_region_iotlb_notify_one(n, &entry);
 }
 
 /* Unmap all notifiers attached to @mr */
