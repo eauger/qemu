@@ -1352,7 +1352,7 @@ static int vtd_dev_to_context_entry(IntelIOMMUState *s, uint8_t bus_num,
 static int vtd_sync_shadow_page_hook(IOMMUTLBEntry *entry,
                                      void *private)
 {
-    memory_region_notify_iommu((IOMMUMemoryRegion *)private, 0, *entry);
+    memory_region_iotlb_notify_iommu((IOMMUMemoryRegion *)private, 0, *entry);
     return 0;
 }
 
@@ -1921,7 +1921,7 @@ static void vtd_iotlb_page_invalidate_notify(IntelIOMMUState *s,
                     .addr_mask = size - 1,
                     .perm = IOMMU_NONE,
                 };
-                memory_region_notify_iommu(&vtd_as->iommu, 0, entry);
+                memory_region_iotlb_notify_iommu(&vtd_as->iommu, 0, entry);
             }
         }
     }
@@ -2386,7 +2386,7 @@ static bool vtd_process_device_iotlb_desc(IntelIOMMUState *s,
     entry.iova = addr;
     entry.perm = IOMMU_NONE;
     entry.translated_addr = 0;
-    memory_region_notify_iommu(&vtd_dev_as->iommu, 0, entry);
+    memory_region_iotlb_notify_iommu(&vtd_dev_as->iommu, 0, entry);
 
 done:
     return true;
@@ -3395,7 +3395,7 @@ static void vtd_address_space_unmap(VTDAddressSpace *as, IOMMUNotifier *n)
     map.size = entry.addr_mask;
     iova_tree_remove(as->iova_tree, &map);
 
-    memory_region_notify_one(n, &entry);
+    memory_region_iotlb_notify_one(n, &entry);
 }
 
 static void vtd_address_space_unmap_all(IntelIOMMUState *s)
@@ -3418,7 +3418,7 @@ static void vtd_address_space_refresh_all(IntelIOMMUState *s)
 
 static int vtd_replay_hook(IOMMUTLBEntry *entry, void *private)
 {
-    memory_region_notify_one((IOMMUNotifier *)private, entry);
+    memory_region_iotlb_notify_one((IOMMUNotifier *)private, entry);
     return 0;
 }
 
