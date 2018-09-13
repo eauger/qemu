@@ -1066,6 +1066,25 @@ static int smmuv3_cmdq_consume(SMMUv3State *s)
     return 0;
 }
 
+static int smmuv3_init_fault_queues(SMMUv3State *s)
+{
+    SMMUState *base = &s->smmu_state;
+    SMMUNotifierNode *node;
+    IOMMUConfig config;
+    /* TODO: today we cap the shift to 5 to avoid the kfifo to become too big*/
+    int qs = MIN(5, s->eventq.log2size);
+
+    config.fault_cfg.qs = qs;
+
+    QLIST_FOREACH(node, &base->notifiers_list, next) {
+        IOMMUMemoryRegion *iommu_mr = &node->sdev->iommu;
+
+        memory_region_config_notify_iommu(iommu_mr, 0, IOMMU_NOTIFIER_INIT_CFG,
+                                          &config);
+    }
+    return 0;
+}
+
 static MemTxResult smmu_writell(SMMUv3State *s, hwaddr offset,
                                uint64_t data, MemTxAttrs attrs)
 {
@@ -1089,6 +1108,7 @@ static MemTxResult smmu_writell(SMMUv3State *s, hwaddr offset,
         if (s->eventq.log2size > SMMU_EVENTQS) {
             s->eventq.log2size = SMMU_EVENTQS;
         }
+        smmuv3_init_fault_queues(s);
         return MEMTX_OK;
     case A_EVENTQ_IRQ_CFG0:
         s->eventq_irq_cfg0 = data;
