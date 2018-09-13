@@ -1541,6 +1541,81 @@ smmuv3_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n)
 {
 }
 
+static inline int
+smmuv3_inject_faults(IOMMUMemoryRegion *iommu_mr, int count,
+                     struct iommu_fault *buf)
+{
+    SMMUDevice *sdev = container_of(iommu_mr, SMMUDevice, iommu);
+    SMMUv3State *s3 = sdev->smmu;
+    uint32_t sid = smmu_get_sid(sdev);
+    int i;
+
+    for (i = 0; i < count; i++) {
+        SMMUEventInfo info = {};
+
+        if (buf[i].type != IOMMU_FAULT_DMA_UNRECOV) {
+            continue;
+        }
+
+       info.sid = sid;
+
+        switch (buf[i].reason) {
+        case IOMMU_FAULT_REASON_UNKNOWN:
+        case IOMMU_FAULT_REASON_INTERNAL:
+            break;
+        case IOMMU_FAULT_REASON_PASID_FETCH:
+            info.type = SMMU_EVT_F_CD_FETCH;
+            break;
+        case IOMMU_FAULT_REASON_DEVICE_CONTEXT_FETCH:
+            info.type = SMMU_EVT_F_STE_FETCH;
+            info.u.f_cd_fetch.addr = buf[i].fetch_addr;
+            break;
+        case IOMMU_FAULT_REASON_BAD_PASID_ENTRY:
+            info.type = SMMU_EVT_C_BAD_CD;
+            /* TODO further fill info.u.c_bad_cd */
+            break;
+        case IOMMU_FAULT_REASON_BAD_DEVICE_CONTEXT_ENTRY:
+            info.type = SMMU_EVT_C_BAD_STE;
+            /* TODO further fill info.u.f_ste_fetch */
+            break;
+        case IOMMU_FAULT_REASON_PASID_INVALID:
+            info.type = SMMU_EVT_C_BAD_SUBSTREAMID;
+            /* TODO further fill info.u.c_bad_substream */
+            break;
+        case IOMMU_FAULT_REASON_SOURCEID_INVALID:
+            info.type = SMMU_EVT_C_BAD_STREAMID;
+            /* TODO further fill info.u.c_bad_streamid */
+            break;
+        case IOMMU_FAULT_REASON_WALK_EABT:
+            info.type = SMMU_EVT_F_WALK_EABT;
+            info.u.f_walk_eabt.addr = buf[i].addr;
+            info.u.f_walk_eabt.addr2 = buf[i].fetch_addr;
+            break;
+        case IOMMU_FAULT_REASON_PTE_FETCH:
+            info.type = SMMU_EVT_F_TRANSLATION;
+            info.u.f_translation.addr = buf[i].addr;
+            break;
+        case IOMMU_FAULT_REASON_PERMISSION:
+            info.type = SMMU_EVT_F_PERMISSION;
+            info.u.f_permission.addr = buf[i].addr;
+            break;
+        case IOMMU_FAULT_REASON_ACCESS:
+            info.type = SMMU_EVT_F_ACCESS;
+            info.u.f_access.addr = buf[i].addr;
+            break;
+        case IOMMU_FAULT_REASON_OOR_ADDRESS:
+            info.type = SMMU_EVT_F_ADDR_SIZE;
+            info.u.f_addr_size.addr = buf[i].addr;
+            break;
+        default:
+            break;
+        }
+
+        smmuv3_record_event(s3, &info);
+    }
+    return 0;
+}
+
 static void smmuv3_iommu_memory_region_class_init(ObjectClass *klass,
                                                   void *data)
 {
@@ -1550,6 +1625,7 @@ static void smmuv3_iommu_memory_region_class_init(ObjectClass *klass,
     imrc->notify_flag_changed = smmuv3_notify_flag_changed;
     imrc->get_attr = smmuv3_get_attr;
     imrc->replay = smmuv3_replay;
+    imrc->inject_faults = smmuv3_inject_faults;
 }
 
 static const TypeInfo smmuv3_type_info = {
