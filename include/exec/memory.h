@@ -28,6 +28,7 @@
 #include "hw/qdev-core.h"
 #ifdef CONFIG_LINUX
 #include <linux/iommu.h>
+#include <linux/vfio.h>
 #endif
 
 #define RAM_ADDR_INVALID (~(ram_addr_t)0)
@@ -82,6 +83,7 @@ typedef struct IOMMUConfig {
     union {
 #ifdef __linux__
         struct iommu_pasid_table_config pasid_cfg;
+        struct vfio_iommu_type1_guest_fault_config fault_cfg;
 #endif
           };
 } IOMMUConfig;
@@ -98,10 +100,13 @@ typedef enum {
     IOMMU_NOTIFIER_MAP = 0x2,
     /* Notify stage 1 config changes */
     IOMMU_NOTIFIER_PASID_CFG = 0x4,
+    /* Notify IOMMU initial setup */
+    IOMMU_NOTIFIER_INIT_CFG = 0x8,
 } IOMMUNotifierFlag;
 
 #define IOMMU_NOTIFIER_IOTLB_ALL (IOMMU_NOTIFIER_MAP | IOMMU_NOTIFIER_UNMAP)
-#define IOMMU_NOTIFIER_CONFIG_ALL (IOMMU_NOTIFIER_PASID_CFG)
+#define IOMMU_NOTIFIER_CONFIG_ALL (IOMMU_NOTIFIER_PASID_CFG | \
+                                   IOMMU_NOTIFIER_INIT_CFG)
 
 struct IOMMUNotifier;
 struct IOMMUConfig;
