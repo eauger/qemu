@@ -37,11 +37,15 @@
 #include "sysemu/kvm.h"
 #include "trace.h"
 #include "qapi/error.h"
+#include "qemu/event_notifier.h"
+#include "qemu/main-loop.h"
 
 struct vfio_group_head vfio_group_list =
     QLIST_HEAD_INITIALIZER(vfio_group_list);
 struct vfio_as_head vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
+
+#define MAX_QUERIED_FAULT_EVENTS 10
 
 #ifdef CONFIG_KVM
 /*
@@ -347,6 +351,111 @@ static bool vfio_get_vaddr(IOMMUTLBEntry *iotlb, void **vaddr,
     *read_only = !writable || mr->readonly;
 
     return true;
+}
+
+/*
+ * At the moment we retrieve MAX_QUERIED_FAULT_EVENTS events
+ * TODO: loop until the ioctl returns count = 0
+ */
+static void vfio_iommu_fault_handler(void *data)
+{
+    VFIOGuestIOMMU *giommu = (VFIOGuestIOMMU *)data;
+    IOMMUMemoryRegion *iommu = giommu->iommu;
+    struct vfio_iommu_type1_get_fault_events *ustruct;
+    size_t fault_buffer_size =
+        MAX_QUERIED_FAULT_EVENTS * sizeof(struct iommu_fault);
+    size_t argsz = sizeof(*ustruct) + fault_buffer_size;
+    int ret;
+
+    ustruct = g_malloc0(argsz);
+    ustruct->argsz = argsz;
+    ustruct->count = 0;
+
+    ret = ioctl(giommu->container->fd, VFIO_IOMMU_GET_FAULT_EVENTS, ustruct);
+    if (ret) {
+        error_report("%s: failed to get pending faults (%d)",
+                     __func__, ret);
+    }
+
+    assert(ustruct->count > 0);
+    memory_region_inject_faults(iommu, ustruct->count, ustruct->events);
+
+    g_free(ustruct);
+
+    ret = event_notifier_test_and_clear(giommu->fault_notifier);
+    if (!ret) {
+        error_report("Error when clearing fd=%d (ret = %d)",
+                     event_notifier_get_fd(giommu->fault_notifier), ret);
+    }
+}
+
+static void
+vfio_iommu_fault_handler_register(IOMMUNotifier *n, IOMMUConfig *cfg)
+
+{
+    VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
+    VFIOContainer *container = giommu->container;
+    struct vfio_iommu_type1_set_fault_eventfd info;
+    int ret;
+
+    info.argsz = sizeof(info);
+    info.flags = 0;
+
+    giommu->fault_notifier = g_malloc0(sizeof(EventNotifier));
+    ret = event_notifier_init(giommu->fault_notifier, 0);
+    if (ret) {
+        error_report("%s: failed to init fault eventfd (%d)",
+                     __func__, ret);
+        goto out;
+    }
+
+    info.eventfd = event_notifier_get_fd(giommu->fault_notifier);
+    qemu_set_fd_handler(info.eventfd, vfio_iommu_fault_handler, NULL, giommu);
+
+    memcpy(&info.config, &cfg->fault_cfg, sizeof(cfg->fault_cfg));
+
+    ret = ioctl(container->fd, VFIO_IOMMU_SET_FAULT_EVENTFD, &info);
+    if (ret) {
+        error_report("%s: failed to setup iommu fault propagation (%d)",
+                     __func__, ret);
+        goto cleanup;
+    }
+    return;
+cleanup:
+    qemu_set_fd_handler(info.eventfd, NULL, NULL, NULL);
+    event_notifier_cleanup(giommu->fault_notifier);
+out:
+    g_free(giommu->fault_notifier);
+}
+
+static void vfio_iommu_fault_handler_unregister(IOMMUNotifier *n)
+{
+    VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
+    VFIOContainer *container = giommu->container;
+    struct vfio_iommu_type1_set_fault_eventfd info;
+    int eventfd, ret;
+
+    if (!(n->notifier_flags & IOMMU_NOTIFIER_INIT_CFG) ||
+        !giommu->fault_notifier) {
+        return;
+    }
+
+    eventfd = event_notifier_get_fd(giommu->fault_notifier);
+    if (eventfd < 0) {
+        return;
+    }
+
+    info.argsz = sizeof(info);
+    info.flags = 0;
+    info.eventfd = -1;
+    ret = ioctl(container->fd, VFIO_IOMMU_SET_FAULT_EVENTFD, &info);
+    if (ret) {
+        error_report("%s: failed to stop iommu fault propagation (%d)",
+                     __func__, ret);
+    }
+    qemu_set_fd_handler(eventfd, NULL, NULL, NULL);
+    event_notifier_cleanup(giommu->fault_notifier);
+    g_free(giommu->fault_notifier);
 }
 
 /* Program the guest @cfg on physical IOMMU stage 1 (nested mode) */
@@ -754,6 +863,14 @@ static void vfio_listener_region_add(MemoryListener *listener,
             QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
             memory_region_register_iommu_notifier(section->mr, &giommu->n);
 
+            /* Config notifier to register fault handler */
+            giommu = vfio_alloc_guest_iommu(container, iommu_mr, offset);
+            iommu_config_notifier_init(&giommu->n,
+                                       vfio_iommu_fault_handler_register,
+                                       IOMMU_NOTIFIER_INIT_CFG, iommu_idx);
+            QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
+            memory_region_register_iommu_notifier(section->mr, &giommu->n);
+
             /* IOTLB unmap notifier to propagate guest IOTLB invalidations */
             giommu = vfio_alloc_guest_iommu(container, iommu_mr, offset);
             iommu_iotlb_notifier_init(&giommu->n, vfio_iommu_unmap_notify,
@@ -846,6 +963,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
                 } else if (is_iommu_config_notifier(&giommu->n)) {
                     memory_region_unregister_iommu_notifier(section->mr,
                                                             &giommu->n);
+                    vfio_iommu_fault_handler_unregister(&giommu->n);
                 }
                 QLIST_REMOVE(giommu, giommu_next);
                 g_free(giommu);

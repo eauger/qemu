@@ -91,6 +91,7 @@ typedef struct VFIOGuestIOMMU {
     hwaddr iommu_offset;
     IOMMUNotifier n;
     QLIST_ENTRY(VFIOGuestIOMMU) giommu_next;
+    EventNotifier *fault_notifier;
 } VFIOGuestIOMMU;
 
 typedef struct VFIOHostDMAWindow {
