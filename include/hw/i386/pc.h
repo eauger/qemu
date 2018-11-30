@@ -52,6 +52,8 @@ struct PCMachineState {
     bool smbus;
     bool sata;
     bool pit;
+    bool virtio_iommu;
+    uint16_t virtio_iommu_bdf;
 
     /* RAM information (sizes, addresses, configuration): */
     ram_addr_t below_4g_mem_size, above_4g_mem_size;
