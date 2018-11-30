@@ -15,6 +15,7 @@
 #include "hw/mem/pc-dimm.h"
 #include "hw/mem/nvdimm.h"
 #include "hw/acpi/acpi_dev_interface.h"
+#include "hw/acpi/acpi.h"
 
 #define HPET_INTCAP "hpet-intcap"
 
@@ -46,6 +47,7 @@ struct PCMachineState {
     bool smbus_enabled;
     bool sata_enabled;
     bool pit_enabled;
+    ACPIIORTConfig iort_config;
 
     /* NUMA information: */
     uint64_t numa_nodes;

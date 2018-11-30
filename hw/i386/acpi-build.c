@@ -2841,6 +2841,15 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
             build_hmat(tables_blob, tables->linker, machine->numa_state);
         }
     }
+
+    if (pcms->iort_config.iommu_type == ACPI_IORT_IOMMU_VIRTIO) {
+        acpi_add_table(table_offsets, tables_blob);
+
+        pcms->iort_config.node_bitmap = ACPI_IORT_RC_NODE |
+                                        ACPI_IORT_IOMMU_NODE;
+        build_iort(tables_blob, tables->linker, &pcms->iort_config);
+    }
+
     if (acpi_get_mcfg(&mcfg)) {
         acpi_add_table(table_offsets, tables_blob);
         build_mcfg(tables_blob, tables->linker, &mcfg);
