@@ -2580,9 +2580,10 @@ int vfio_populate_vga(VFIOPCIDevice *vdev, Error **errp)
 static void vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
 {
     VFIODevice *vbasedev = &vdev->vbasedev;
-    struct vfio_region_info *reg_info;
+    struct vfio_region_info *reg_info, *fault_region_info;
     struct vfio_irq_info irq_info = { .argsz = sizeof(irq_info) };
     int i, ret = -1;
+    char *fault_region_name;
 
     /* Sanity check device */
     if (!(vbasedev->flags & VFIO_DEVICE_FLAGS_PCI)) {
@@ -2658,6 +2659,30 @@ static void vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
                     "Could not enable error recovery for the device",
                     vbasedev->name);
     }
+
+    ret = vfio_get_dev_region_info(&vdev->vbasedev,
+                                   VFIO_REGION_TYPE_NESTED,
+                                   VFIO_REGION_SUBTYPE_NESTED_FAULT_REGION,
+                                   &fault_region_info);
+    if (ret) {
+        error_setg_errno(errp, -ret, "failed to get region %d info", i);
+        return;
+    }
+
+    fault_region_name = g_strdup_printf("%s FAULT %d", vbasedev->name,
+                                        fault_region_info->index);
+
+    ret = vfio_region_setup(OBJECT(vdev), vbasedev,
+                            &vdev->fault_region, fault_region_info->index,
+                            fault_region_name);
+    if (ret) {
+        error_setg_errno(errp, -ret, "failed to setup the fault region %d",
+                         fault_region_info->index);
+        return;
+    }
+    g_free(fault_region_name);
+    g_free(fault_region_info);
+
 }
 
 static void vfio_put_device(VFIOPCIDevice *vdev)
@@ -2708,10 +2733,33 @@ static void vfio_req_notifier_handler(void *opaque)
 static void vfio_dma_fault_notifier_handler(void *opaque)
 {
     VFIOPCIDevice *vdev = opaque;
+    int cons, prod, size;
+    struct vfio_fault_region *fr;
+    struct iommu_fault *queue;
+    PCIDevice *pdev = &vdev->pdev;
+    AddressSpace *as = pci_device_iommu_address_space(pdev);
+    IOMMUMemoryRegion *iommu_mr = IOMMU_MEMORY_REGION(as->root);
 
     if (!event_notifier_test_and_clear(&vdev->dma_fault_notifier)) {
         return;
     }
+
+    fr = (struct vfio_fault_region *)vdev->fault_region.mmaps[0].mmap;
+    if (!fr) {
+        error_report_once("vfio: fault region is not mmapped!");
+        return;
+    }
+    queue = fr->queue;
+    cons = fr->header.cons;
+    prod = fr->header.prod;
+    size = fr->header.size;
+
+    while (cons != prod) {
+        memory_region_inject_faults(iommu_mr, 1, &queue[cons]);
+        cons = (cons + 1) % size;
+        fr->header.cons = cons;
+    }
+
 }
 
 static void vfio_realize(PCIDevice *pdev, Error **errp)
@@ -3011,6 +3059,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
+    vfio_region_mmap(&vdev->fault_region);
     vfio_register_event_notifier(vdev, VFIO_PCI_DMA_FAULT_IRQ_INDEX, true,
                                  vfio_dma_fault_notifier_handler, &err);
     if (err) {
@@ -3073,6 +3122,7 @@ static void vfio_exitfn(PCIDevice *pdev)
     if (err) {
         warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
     }
+    vfio_region_exit(&vdev->fault_region);
     pci_device_set_intx_routing_notifier(&vdev->pdev, NULL);
     vfio_disable_interrupts(vdev);
     if (vdev->intx.mmap_timer) {
