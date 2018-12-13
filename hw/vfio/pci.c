@@ -139,6 +139,9 @@ static int vfio_register_event_notifier(VFIOPCIDevice *vdev,
     case VFIO_PCI_INTX_IRQ_INDEX:
         notifier = &vdev->intx.interrupt;
         break;
+    case VFIO_PCI_DMA_FAULT_IRQ_INDEX:
+        notifier = &vdev->dma_fault_notifier;
+        break;
     default:
         return -EINVAL;
     }
@@ -2702,6 +2705,15 @@ static void vfio_req_notifier_handler(void *opaque)
     }
 }
 
+static void vfio_dma_fault_notifier_handler(void *opaque)
+{
+    VFIOPCIDevice *vdev = opaque;
+
+    if (!event_notifier_test_and_clear(&vdev->dma_fault_notifier)) {
+        return;
+    }
+}
+
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = PCI_VFIO(pdev);
@@ -2998,6 +3010,13 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
             warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
         }
     }
+
+    vfio_register_event_notifier(vdev, VFIO_PCI_DMA_FAULT_IRQ_INDEX, true,
+                                 vfio_dma_fault_notifier_handler, &err);
+    if (err) {
+        warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
+    }
+
     vfio_setup_resetfn_quirk(vdev);
 
     return;
@@ -3048,6 +3067,11 @@ static void vfio_exitfn(PCIDevice *pdev)
         if (err) {
             warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
         }
+    }
+    vfio_register_event_notifier(vdev, VFIO_PCI_DMA_FAULT_IRQ_INDEX,
+                                 false, NULL, &err);
+    if (err) {
+        warn_reportf_err(err, VFIO_MSG_PREFIX, vdev->vbasedev.name);
     }
     pci_device_set_intx_routing_notifier(&vdev->pdev, NULL);
     vfio_disable_interrupts(vdev);
