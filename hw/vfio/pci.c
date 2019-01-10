@@ -2753,13 +2753,20 @@ static void vfio_dma_fault_notifier_handler(void *opaque)
     cons = fr->header.cons;
     prod = fr->header.prod;
     size = fr->header.size;
+    printf("==> %s cons=%d prod=%d size=%d\n", __func__, cons, prod, size);
 
     while (cons != prod) {
+        printf("%s cons=%d prod=%d type=%d reason=%d addr=%lld\n",
+               __func__, cons, prod,
+               (unsigned)queue[cons].type, (unsigned) queue[cons].reason,
+               queue[cons].addr);
         memory_region_inject_faults(iommu_mr, 1, &queue[cons]);
         cons = (cons + 1) % size;
         fr->header.cons = cons;
+        printf("%s update cons to %d\n", __func__, fr->header.cons);
     }
 
+    printf("%s final state : cons=%d prod=%d\n", __func__, cons, prod);
 }
 
 static void vfio_realize(PCIDevice *pdev, Error **errp)
