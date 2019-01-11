@@ -2739,6 +2739,8 @@ static void vfio_dma_fault_notifier_handler(void *opaque)
     PCIDevice *pdev = &vdev->pdev;
     AddressSpace *as = pci_device_iommu_address_space(pdev);
     IOMMUMemoryRegion *iommu_mr = IOMMU_MEMORY_REGION(as->root);
+    struct vfio_region_info *fault_region_info; 
+    char *queue_buffer = g_malloc(0x10000);
 
     if (!event_notifier_test_and_clear(&vdev->dma_fault_notifier)) {
         return;
@@ -2746,8 +2748,22 @@ static void vfio_dma_fault_notifier_handler(void *opaque)
 
     fr = (struct vfio_fault_region *)vdev->fault_region.mmaps[0].mmap;
     if (!fr) {
-        error_report_once("vfio: fault region is not mmapped!");
-        return;
+        ssize_t bytes;
+
+        printf("%s fault region is not mapped, reading instead\n", __func__);
+        vfio_get_dev_region_info(&vdev->vbasedev,
+                                 VFIO_REGION_TYPE_NESTED,
+                                 VFIO_REGION_SUBTYPE_NESTED_FAULT_REGION,
+                                 &fault_region_info);
+
+        bytes = pread(vdev->vbasedev.fd, queue_buffer, 0x10000,
+                      (uint64_t) fault_region_info->index << 40ULL);
+        g_free(fault_region_info);
+        if (bytes != 0x10000) {
+            printf("%s unexpected returned bytes=%ld\n", __func__, bytes);
+            return;
+        }
+        fr = (struct vfio_fault_region *)queue_buffer;
     }
     queue = fr->queue;
     cons = fr->header.cons;
@@ -3066,7 +3082,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
-    vfio_region_mmap(&vdev->fault_region);
+    //vfio_region_mmap(&vdev->fault_region);
     vfio_register_event_notifier(vdev, VFIO_PCI_DMA_FAULT_IRQ_INDEX, true,
                                  vfio_dma_fault_notifier_handler, &err);
     if (err) {
