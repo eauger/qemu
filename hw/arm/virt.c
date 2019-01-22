@@ -1455,7 +1455,7 @@ static void machvirt_init(MachineState *machine)
 
     vms->smp_cpus = smp_cpus;
 
-    if (machine->ram_size > vms->memmap[VIRT_MEM].size) {
+    if (!vms->extended_memmap && machine->ram_size > vms->memmap[VIRT_MEM].size) {
         error_report("mach-virt: cannot model more than %dGB RAM", RAMLIMIT_GB);
         exit(1);
     }
