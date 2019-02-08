@@ -1605,8 +1605,8 @@ smmuv3_inject_faults(IOMMUMemoryRegion *iommu_mr, int count,
             info.u.f_permission.addr = record->addr;
             break;
         default:
-            warn_report("%s Unexpected fault reason received from host: %d",
-                        __func__, record->reason);
+            warn_report("%s dummy fault reason received from host: %d addr=0x%llx",
+                        __func__, record->reason, record->addr);
             continue;
         }
 
