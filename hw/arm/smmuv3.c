@@ -806,9 +806,10 @@ epilogue:
 static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
                                IOMMUNotifier *n,
                                int asid, dma_addr_t iova,
-                               uint8_t tg, uint64_t num_pages)
+                               uint8_t tg, uint64_t num_pages, bool leaf)
 {
     SMMUDevice *sdev = container_of(mr, SMMUDevice, iommu);
+    struct iommu_cache_invalidate_info cache_info = {};
     IOMMUTLBEvent event;
     uint8_t granule;
 
@@ -841,6 +842,22 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
     event.entry.perm = IOMMU_NONE;
 
     memory_region_notify_iommu_one(n, &event);
+
+    cache_info.version = IOMMU_CACHE_INVALIDATE_INFO_VERSION_1;
+    cache_info.cache = IOMMU_CACHE_INV_TYPE_IOTLB;
+    cache_info.granularity = IOMMU_INV_GRANU_ADDR;
+    cache_info.granu.addr_info.flags = IOMMU_INV_ADDR_FLAGS_ARCHID;
+    if (leaf) {
+        cache_info.granu.addr_info.flags |= IOMMU_INV_ADDR_FLAGS_LEAF;
+    }
+    cache_info.granu.addr_info.archid = asid;
+    cache_info.granu.addr_info.addr = iova;
+    cache_info.granu.addr_info.granule_size = 1 << granule;
+    cache_info.granu.addr_info.nb_granules = num_pages;
+
+    if (smmu_iommu_invalidate_cache(sdev, &cache_info)) {
+        error_report("Cache flush failed");
+    }
 }
 
 /**
@@ -872,7 +889,7 @@ static void smmuv3_notify_asid(SMMUDevice *sdev, IOMMUMemoryRegion *mr,
 
 /* invalidate an asid/iova range tuple in all mr's */
 static void smmuv3_inv_notifiers_iova(SMMUState *s, int asid, dma_addr_t iova,
-                                      uint8_t tg, uint64_t num_pages)
+                                      uint8_t tg, uint64_t num_pages, bool leaf)
 {
     SMMUDevice *sdev;
 
@@ -884,7 +901,7 @@ static void smmuv3_inv_notifiers_iova(SMMUState *s, int asid, dma_addr_t iova,
                                         tg, num_pages);
 
         IOMMU_NOTIFIER_FOREACH(n, mr) {
-            smmuv3_notify_iova(mr, n, asid, iova, tg, num_pages);
+            smmuv3_notify_iova(mr, n, asid, iova, tg, num_pages, leaf);
         }
     }
 }
@@ -909,7 +926,7 @@ static void smmuv3_s1_range_inval(SMMUState *s, Cmd *cmd)
 
     if (!tg) {
         trace_smmuv3_s1_range_inval(vmid, asid, addr, tg, 1, ttl, leaf);
-        smmuv3_inv_notifiers_iova(s, asid, addr, tg, 1);
+        smmuv3_inv_notifiers_iova(s, asid, addr, tg, 1, leaf);
         smmu_iotlb_inv_iova(s, asid, addr, tg, 1, ttl);
         return;
     }
@@ -927,7 +944,7 @@ static void smmuv3_s1_range_inval(SMMUState *s, Cmd *cmd)
 
         num_pages = (mask + 1) >> granule;
         trace_smmuv3_s1_range_inval(vmid, asid, addr, tg, num_pages, ttl, leaf);
-        smmuv3_inv_notifiers_iova(s, asid, addr, tg, num_pages);
+        smmuv3_inv_notifiers_iova(s, asid, addr, tg, num_pages, leaf);
         smmu_iotlb_inv_iova(s, asid, addr, tg, num_pages, ttl);
         addr += mask + 1;
     }
