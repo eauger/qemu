@@ -209,6 +209,15 @@ static const char *qtest_qemu_binary(void)
     return qemu_bin;
 }
 
+static const char *qtest_qemu_extra_args(void)
+{
+    const char *qemu_extra_args;
+
+    qemu_extra_args = getenv("QTEST_QEMU_EXTRA_ARGS");
+
+    return qemu_extra_args;
+}
+
 QTestState *qtest_init_without_qmp_handshake(const char *extra_args)
 {
     QTestState *s;
@@ -217,6 +226,7 @@ QTestState *qtest_init_without_qmp_handshake(const char *extra_args)
     gchar *qmp_socket_path;
     gchar *command;
     const char *qemu_binary = qtest_qemu_binary();
+    const char *qemu_extra_args = qtest_qemu_extra_args();
 
     s = g_new(QTestState, 1);
 
@@ -243,10 +253,10 @@ QTestState *qtest_init_without_qmp_handshake(const char *extra_args)
                               "-mon chardev=char0,mode=control "
                               "-accel qtest "
                               "-display none "
-                              "%s", qemu_binary, socket_path,
+                              "%s %s", qemu_binary, socket_path,
                               getenv("QTEST_LOG") ? "/dev/fd/2" : "/dev/null",
                               qmp_socket_path,
-                              extra_args ?: "");
+                              extra_args ?: "", qemu_extra_args ?: "");
 
     g_test_message("starting QEMU: %s", command);
 
