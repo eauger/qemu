@@ -147,6 +147,30 @@ struct ACPIREGS {
     Notifier wakeup;
 };
 
+#define ACPI_IORT_IOMMU_NODE        (1 << 0)
+#define ACPI_IORT_RC_NODE           (1 << 1)
+#define ACPI_IORT_ITS_NODE          (1 << 2)
+
+typedef enum ACPIIORTIOMMUType {
+    ACPI_IORT_IOMMU_NONE,
+    ACPI_IORT_IOMMU_SMMUV3,
+    ACPI_IORT_IOMMU_VIRTIO,
+} ACPIIORTIOMMUType;
+
+typedef struct ACPIIORTConfig {
+    uint32_t node_bitmap;
+    ACPIIORTIOMMUType iommu_type;
+    union {
+        struct VIRTIOIOMMUConfig {
+            uint32_t bdf;
+        } virtio_iommu_config;
+        struct SMMUV3Config {
+            int irq;
+            uint64_t base;
+        } smmu_config;
+    };
+} ACPIIORTConfig;
+
 /* PM_TMR */
 void acpi_pm_tmr_update(ACPIREGS *ar, bool enable);
 void acpi_pm_tmr_calc_overflow_time(ACPIREGS *ar);

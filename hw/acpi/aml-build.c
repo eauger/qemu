@@ -1875,6 +1875,173 @@ build_hdr:
                  "FACP", tbl->len - fadt_start, f->rev, oem_id, oem_table_id);
 }
 
+static inline void
+fill_iort_idmap(AcpiIortIdMapping *idmap, int i,
+                uint32_t input_base, uint32_t id_count,
+                uint32_t output_base, uint32_t output_reference)
+{
+    idmap[i].input_base = cpu_to_le32(input_base);
+    idmap[i].id_count = cpu_to_le32(id_count);
+    idmap[i].output_base = cpu_to_le32(output_base);
+    idmap[i].output_reference = cpu_to_le32(output_reference);
+}
+
+static int count_iort_nodes(uint32_t node_bitmap)
+{
+    int count = 0;
+
+    while (node_bitmap) {
+        if (node_bitmap & 0x1) {
+            count++;
+        }
+        node_bitmap >>= 1;
+    }
+    return count;
+}
+
+void build_iort(GArray *table_data, BIOSLinker *linker, ACPIIORTConfig *config)
+{
+    int nb_nodes = count_iort_nodes(config->node_bitmap);
+    int iort_start = table_data->len;
+    AcpiIortIdMapping *idmap;
+    AcpiIortItsGroup *its;
+    AcpiIortTable *iort;
+    size_t node_size, iort_node_offset, iort_length;
+    size_t its_offset, iommu_offset = 0;
+    AcpiIortRC *rc;
+    int nb_rc_idmappings = 1;
+
+    iort = acpi_data_push(table_data, sizeof(*iort));
+
+    iort_length = sizeof(*iort);
+    iort->node_count = cpu_to_le32(nb_nodes);
+    /*
+     * Use a copy in case table_data->data moves during acpi_data_push
+     * operations.
+     */
+    iort_node_offset = sizeof(*iort);
+    iort->node_offset = cpu_to_le32(iort_node_offset);
+
+    if (config->node_bitmap & ACPI_IORT_ITS_NODE) {
+        /* ITS group node */
+        its_offset = iort_node_offset;
+        node_size =  sizeof(*its) + sizeof(uint32_t);
+        iort_length += node_size;
+        its = acpi_data_push(table_data, node_size);
+
+        its->type = ACPI_IORT_NODE_ITS_GROUP;
+        its->length = cpu_to_le16(node_size);
+        its->its_count = cpu_to_le32(1);
+        its->identifiers[0] = 0; /* MADT translation_id */
+        iort_node_offset += node_size;
+    }
+
+    if (config->iommu_type == ACPI_IORT_IOMMU_SMMUV3) {
+        int irq =  config->smmu_config.irq;
+        AcpiIortSmmu3 *smmu;
+
+        iommu_offset = iort_node_offset;
+        node_size = sizeof(*smmu) + sizeof(*idmap);
+        iort_length += node_size;
+        smmu = acpi_data_push(table_data, node_size);
+
+        smmu->type = ACPI_IORT_NODE_SMMU_V3;
+        smmu->length = cpu_to_le16(node_size);
+        smmu->mapping_count = cpu_to_le32(1);
+        smmu->mapping_offset = cpu_to_le32(sizeof(*smmu));
+        smmu->base_address = cpu_to_le64(config->smmu_config.base);
+        smmu->flags = cpu_to_le32(ACPI_IORT_SMMU_V3_COHACC_OVERRIDE);
+        smmu->event_gsiv = cpu_to_le32(irq);
+        smmu->pri_gsiv = cpu_to_le32(irq + 1);
+        smmu->gerr_gsiv = cpu_to_le32(irq + 2);
+        smmu->sync_gsiv = cpu_to_le32(irq + 3);
+
+        if (config->node_bitmap & ACPI_IORT_ITS_NODE) {
+            /*
+             * Identity RID mapping covering the whole input RID range.
+             * The output IORT node is the ITS group node (the first node).
+             */
+            fill_iort_idmap(smmu->id_mapping_array, 0, 0, 0xFFFF, 0,
+                            its_offset);
+        }
+    } else if (config->iommu_type == ACPI_IORT_IOMMU_VIRTIO) {
+        AcpiIortPVIommuPCI *iommu;
+        int nb_iommu_idmappings = 0;
+
+        nb_rc_idmappings = 2;
+        if (config->node_bitmap & ACPI_IORT_ITS_NODE) {
+            nb_iommu_idmappings = 1;
+        }
+        iommu_offset = iort_node_offset;
+        node_size = sizeof(*iommu) + nb_iommu_idmappings * sizeof(*idmap);
+        iort_length += node_size;
+        iommu = acpi_data_push(table_data, node_size);
+
+        iommu->type = ACPI_IORT_NODE_PARAVIRT;
+        iommu->length = cpu_to_le16(node_size);
+        iommu->mapping_count = cpu_to_le32(nb_iommu_idmappings);
+        iommu->mapping_offset = cpu_to_le32(sizeof(*iommu));
+        iommu->devid = cpu_to_le32(config->virtio_iommu_config.bdf);
+        iommu->model = cpu_to_le32(ACPI_IORT_NODE_PV_VIRTIO_IOMMU_PCI);
+
+        if (config->node_bitmap & ACPI_IORT_ITS_NODE) {
+            /*
+             * Identity RID mapping covering the whole input RID range
+             * output IORT node is the ITS group node (the first node)
+             */
+             fill_iort_idmap(iommu->id_mapping_array, 0, 0, 0xffff, 0,
+                            its_offset);
+        }
+    }
+
+    assert(config->node_bitmap & ACPI_IORT_RC_NODE);
+
+    /* Root Complex Node */
+    node_size = sizeof(*rc) + nb_rc_idmappings * sizeof(*idmap);
+    iort_length += node_size;
+    rc = acpi_data_push(table_data, node_size);
+
+    rc->type = ACPI_IORT_NODE_PCI_ROOT_COMPLEX;
+    rc->length = cpu_to_le16(node_size);
+    rc->mapping_count = cpu_to_le32(nb_rc_idmappings);
+    rc->mapping_offset = cpu_to_le32(sizeof(*rc));
+
+    /* fully coherent device */
+    rc->memory_properties.cache_coherency = cpu_to_le32(1);
+    rc->memory_properties.memory_flags = 0x3; /* CCA = CPM = DCAS = 1 */
+    rc->pci_segment_number = 0; /* MCFG pci_segment */
+
+    if (config->iommu_type == ACPI_IORT_IOMMU_SMMUV3) {
+        /* Identity RID mapping and output IORT node is the iommu node */
+        fill_iort_idmap(rc->id_mapping_array, 0, 0, 0xFFFF, 0, iommu_offset);
+    } else if (config->iommu_type == ACPI_IORT_IOMMU_VIRTIO) {
+        uint32_t bdf = config->virtio_iommu_config.bdf;
+        /*
+         * Identity mapping with the IOMMU RID excluded. The output
+         * IORT node is the iommu node.
+         */
+        fill_iort_idmap(rc->id_mapping_array, 0, 0, bdf, 0, iommu_offset);
+        fill_iort_idmap(rc->id_mapping_array, 1, bdf + 1, 0xFFFF - bdf,
+                        bdf + 1, iommu_offset);
+    } else if (config->node_bitmap & ACPI_IORT_ITS_NODE) {
+        /*
+         * Identity RID mapping and the output IORT node is the ITS group
+         * node (the first node).
+         */
+        fill_iort_idmap(rc->id_mapping_array, 0, 0, 0xFFFF, 0, its_offset);
+    }
+
+    /*
+     * Update the pointer address in case table_data->data moves during above
+     * acpi_data_push operations.
+     */
+    iort = (AcpiIortTable *)(table_data->data + iort_start);
+    iort->length = cpu_to_le32(iort_length);
+
+    build_header(linker, table_data, (void *)(table_data->data + iort_start),
+                 "IORT", table_data->len - iort_start, 0, NULL, NULL);
+}
+
 /* ACPI 5.0: 6.4.3.8.2 Serial Bus Connection Descriptors */
 static Aml *aml_serial_bus_device(uint8_t serial_bus_type, uint8_t flags,
                                   uint16_t type_flags,

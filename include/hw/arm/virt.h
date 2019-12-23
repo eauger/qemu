@@ -37,6 +37,7 @@
 #include "hw/block/flash.h"
 #include "sysemu/kvm.h"
 #include "hw/intc/arm_gicv3_common.h"
+#include "hw/acpi/acpi.h"
 
 #define NUM_GICV2M_SPIS       64
 #define NUM_VIRTIO_TRANSPORTS 32
@@ -50,6 +51,8 @@
 #define ARCH_TIMER_NS_EL2_IRQ 10
 
 #define VIRTUAL_PMU_IRQ 7
+
+#define ARM_SPI_BASE 32
 
 #define PPI(irq) ((irq) + 16)
 
@@ -89,12 +92,6 @@ enum {
     VIRT_HIGH_PCIE_MMIO,
 };
 
-typedef enum VirtIOMMUType {
-    VIRT_IOMMU_NONE,
-    VIRT_IOMMU_SMMUV3,
-    VIRT_IOMMU_VIRTIO,
-} VirtIOMMUType;
-
 typedef struct MemMapEntry {
     hwaddr base;
     hwaddr size;
@@ -123,8 +120,6 @@ typedef struct {
     bool its;
     bool virt;
     int32_t gic_version;
-    VirtIOMMUType iommu;
-    uint16_t virtio_iommu_bdf;
     struct arm_boot_info bootinfo;
     MemMapEntry *memmap;
     char *pciehb_nodename;
@@ -141,6 +136,7 @@ typedef struct {
     DeviceState *gic;
     DeviceState *acpi_dev;
     Notifier powerdown_notifier;
+    ACPIIORTConfig iort_config;
 } VirtMachineState;
 
 #define VIRT_ECAM_ID(high) (high ? VIRT_HIGH_PCIE_ECAM : VIRT_PCIE_ECAM)

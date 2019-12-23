@@ -49,8 +49,6 @@
 #include "kvm_arm.h"
 #include "migration/vmstate.h"
 
-#define ARM_SPI_BASE 32
-
 static void acpi_dsdt_add_cpus(Aml *scope, int smp_cpus)
 {
     uint16_t i;
@@ -371,154 +369,6 @@ static void acpi_dsdt_add_power_button(Aml *scope)
     aml_append(dev, aml_name_decl("_ADR", aml_int(0)));
     aml_append(dev, aml_name_decl("_UID", aml_int(0)));
     aml_append(scope, dev);
-}
-
-static inline void
-fill_iort_idmap(AcpiIortIdMapping *idmap, int i,
-                uint32_t input_base, uint32_t id_count,
-                uint32_t output_base, uint32_t output_reference)
-{
-    idmap[i].input_base = cpu_to_le32(input_base);
-    idmap[i].id_count = cpu_to_le32(id_count);
-    idmap[i].output_base = cpu_to_le32(output_base);
-    idmap[i].output_reference = cpu_to_le32(output_reference);
-}
-
-static void
-build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
-{
-    int nb_nodes, iort_start = table_data->len;
-    AcpiIortIdMapping *idmap;
-    AcpiIortItsGroup *its;
-    AcpiIortTable *iort;
-    size_t node_size, iort_node_offset, iort_length, iommu_offset = 0;
-    AcpiIortRC *rc;
-    int nb_rc_idmappings = 1;
-
-    iort = acpi_data_push(table_data, sizeof(*iort));
-
-    if (vms->iommu) {
-        nb_nodes = 3; /* RC, ITS, IOMMU */
-    } else {
-        nb_nodes = 2; /* RC, ITS */
-    }
-
-    iort_length = sizeof(*iort);
-    iort->node_count = cpu_to_le32(nb_nodes);
-    /*
-     * Use a copy in case table_data->data moves during acpi_data_push
-     * operations.
-     */
-    iort_node_offset = sizeof(*iort);
-    iort->node_offset = cpu_to_le32(iort_node_offset);
-
-    /* ITS group node */
-    node_size =  sizeof(*its) + sizeof(uint32_t);
-    iort_length += node_size;
-    its = acpi_data_push(table_data, node_size);
-
-    its->type = ACPI_IORT_NODE_ITS_GROUP;
-    its->length = cpu_to_le16(node_size);
-    its->its_count = cpu_to_le32(1);
-    its->identifiers[0] = 0; /* MADT translation_id */
-
-    if (vms->iommu == VIRT_IOMMU_SMMUV3) {
-        int irq =  vms->irqmap[VIRT_SMMU] + ARM_SPI_BASE;
-        AcpiIortSmmu3 *smmu;
-
-        iommu_offset = iort_node_offset + node_size;
-        node_size = sizeof(*smmu) + sizeof(*idmap);
-        iort_length += node_size;
-        smmu = acpi_data_push(table_data, node_size);
-
-        smmu->type = ACPI_IORT_NODE_SMMU_V3;
-        smmu->length = cpu_to_le16(node_size);
-        smmu->mapping_count = cpu_to_le32(1);
-        smmu->mapping_offset = cpu_to_le32(sizeof(*smmu));
-        smmu->base_address = cpu_to_le64(vms->memmap[VIRT_SMMU].base);
-        smmu->flags = cpu_to_le32(ACPI_IORT_SMMU_V3_COHACC_OVERRIDE);
-        smmu->event_gsiv = cpu_to_le32(irq);
-        smmu->pri_gsiv = cpu_to_le32(irq + 1);
-        smmu->gerr_gsiv = cpu_to_le32(irq + 2);
-        smmu->sync_gsiv = cpu_to_le32(irq + 3);
-
-        /*
-         * Identity RID mapping covering the whole input RID range.
-         * The output IORT node is the ITS group node (the first node).
-         */
-        fill_iort_idmap(smmu->id_mapping_array, 0, 0, 0xFFFF, 0,
-                        iort_node_offset);
-    } else if (vms->iommu == VIRT_IOMMU_VIRTIO) {
-        AcpiIortPVIommuPCI *iommu;
-
-        nb_rc_idmappings = 2;
-        iommu_offset = iort_node_offset + node_size;
-        node_size = sizeof(*iommu) + 2 * sizeof(*idmap);
-        iort_length += node_size;
-        iommu = acpi_data_push(table_data, node_size);
-
-        iommu->type = ACPI_IORT_NODE_PARAVIRT;
-        iommu->length = cpu_to_le16(node_size);
-        iommu->mapping_count = cpu_to_le32(2);
-        iommu->mapping_offset = cpu_to_le32(sizeof(*iommu));
-        iommu->devid = cpu_to_le32(vms->virtio_iommu_bdf);
-        iommu->model = cpu_to_le32(ACPI_IORT_NODE_PV_VIRTIO_IOMMU_PCI);
-
-        /*
-         * Identity RID mapping covering the whole input RID range
-         * output IORT node is the ITS group node (the first node)
-         */
-        fill_iort_idmap(iommu->id_mapping_array, 0, 0, 0xffff, 0,
-                        iort_node_offset);
-    }
-
-    /* Root Complex Node */
-    node_size = sizeof(*rc) + nb_rc_idmappings * sizeof(*idmap);
-    iort_length += node_size;
-    rc = acpi_data_push(table_data, node_size);
-
-    rc->type = ACPI_IORT_NODE_PCI_ROOT_COMPLEX;
-    rc->length = cpu_to_le16(node_size);
-    rc->mapping_count = cpu_to_le32(nb_rc_idmappings);
-    rc->mapping_offset = cpu_to_le32(sizeof(*rc));
-
-    /* fully coherent device */
-    rc->memory_properties.cache_coherency = cpu_to_le32(1);
-    rc->memory_properties.memory_flags = 0x3; /* CCA = CPM = DCAS = 1 */
-    rc->pci_segment_number = 0; /* MCFG pci_segment */
-
-    if (vms->iommu == VIRT_IOMMU_SMMUV3) {
-        /* Identity RID mapping and output IORT node is the iommu node */
-        fill_iort_idmap(rc->id_mapping_array, 0, 0, 0xFFFF, 0,
-                        iommu_offset);
-    } else if (vms->iommu == VIRT_IOMMU_VIRTIO) {
-        /*
-         * Identity mapping with the IOMMU RID (0x8) excluded. The output
-         * IORT node is the iommu node.
-         */
-        fill_iort_idmap(rc->id_mapping_array, 0, 0, vms->virtio_iommu_bdf, 0,
-                        iommu_offset);
-        fill_iort_idmap(rc->id_mapping_array, 1, vms->virtio_iommu_bdf + 1,
-                        0xFFFF - vms->virtio_iommu_bdf,
-                        vms->virtio_iommu_bdf + 1, iommu_offset);
-    } else {
-        /*
-         * Identity RID mapping and the output IORT node is the ITS group
-         * node (the first node).
-         */
-        fill_iort_idmap(rc->id_mapping_array, 0, 0, 0xFFFF, 0,
-                        iort_node_offset);
-    }
-
-    /*
-     * Update the pointer address in case table_data->data moves during above
-     * acpi_data_push operations.
-     */
-    iort = (AcpiIortTable *)(table_data->data + iort_start);
-    iort->length = cpu_to_le32(iort_length);
-
-    build_header(linker, table_data, (void *)(table_data->data + iort_start),
-                 "IORT", table_data->len - iort_start, 0, NULL, NULL);
 }
 
 static void
@@ -882,7 +732,8 @@ void virt_acpi_build(VirtMachineState *vms, AcpiBuildTables *tables)
 
     if (its_class_name() && !vmc->no_its) {
         acpi_add_table(table_offsets, tables_blob);
-        build_iort(tables_blob, tables->linker, vms);
+        vms->iort_config.node_bitmap |= ACPI_IORT_RC_NODE | ACPI_IORT_ITS_NODE;
+        build_iort(tables_blob, tables->linker, &vms->iort_config);
     }
 
     /* XSDT is pointed to by RSDP */

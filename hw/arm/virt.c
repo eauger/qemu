@@ -1132,9 +1132,9 @@ static void create_pcie_irq_map(const VirtMachineState *vms,
                            0x7           /* PCI irq */);
 }
 
-static void create_smmu(const VirtMachineState *vms,
-                        PCIBus *bus)
+static void create_smmu(VirtMachineState *vms, PCIBus *bus)
 {
+    ACPIIORTConfig *iort_config = &vms->iort_config;
     char *node;
     const char compat[] = "arm,smmu-v3";
     int irq =  vms->irqmap[VIRT_SMMU];
@@ -1144,9 +1144,13 @@ static void create_smmu(const VirtMachineState *vms,
     const char irq_names[] = "eventq\0priq\0cmdq-sync\0gerror";
     DeviceState *dev;
 
-    if (vms->iommu != VIRT_IOMMU_SMMUV3 || !vms->iommu_phandle) {
+    if (vms->iort_config.iommu_type != ACPI_IORT_IOMMU_SMMUV3 ||
+        !vms->iommu_phandle) {
         return;
     }
+
+    iort_config->smmu_config.base = base;
+    iort_config->smmu_config.irq = irq + ARM_SPI_BASE;
 
     dev = qdev_create(NULL, "arm-smmuv3");
 
@@ -1186,7 +1190,7 @@ static void create_smmu(const VirtMachineState *vms,
 static void create_virtio_iommu(VirtMachineState *vms, Error **errp)
 {
     const char compat[] = "virtio,pci-iommu";
-    uint16_t bdf = vms->virtio_iommu_bdf;
+    uint16_t bdf = vms->iort_config.virtio_iommu_config.bdf;
     char *node;
 
     vms->iommu_phandle = qemu_fdt_alloc_phandle(vms->fdt);
@@ -1325,11 +1329,11 @@ static void create_pcie(VirtMachineState *vms)
     qemu_fdt_setprop_cell(vms->fdt, nodename, "#interrupt-cells", 1);
     create_pcie_irq_map(vms, vms->gic_phandle, irq, nodename);
 
-    if (vms->iommu) {
+    if (vms->iort_config.iommu_type) {
         vms->iommu_phandle = qemu_fdt_alloc_phandle(vms->fdt);
 
-        switch (vms->iommu) {
-        case VIRT_IOMMU_SMMUV3:
+        switch (vms->iort_config.iommu_type) {
+        case ACPI_IORT_IOMMU_SMMUV3:
             create_smmu(vms, pci->bus);
             qemu_fdt_setprop_cells(vms->fdt, nodename, "iommu-map",
                                    0x0, vms->iommu_phandle, 0x0, 0x10000);
@@ -1877,25 +1881,26 @@ static void virt_set_gic_version(Object *obj, const char *value, Error **errp)
 static char *virt_get_iommu(Object *obj, Error **errp)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
+    ACPIIORTConfig *iort_config = &vms->iort_config;
 
-    switch (vms->iommu) {
-    case VIRT_IOMMU_NONE:
-        return g_strdup("none");
-    case VIRT_IOMMU_SMMUV3:
+    switch (iort_config->iommu_type) {
+    case ACPI_IORT_IOMMU_SMMUV3:
         return g_strdup("smmuv3");
     default:
-        g_assert_not_reached();
+        return g_strdup("none");
     }
 }
 
 static void virt_set_iommu(Object *obj, const char *value, Error **errp)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
+    ACPIIORTConfig *iort_config = &vms->iort_config;
 
     if (!strcmp(value, "smmuv3")) {
-        vms->iommu = VIRT_IOMMU_SMMUV3;
+        iort_config->iommu_type = ACPI_IORT_IOMMU_SMMUV3;
+        iort_config->node_bitmap |= ACPI_IORT_IOMMU_NODE;
     } else if (!strcmp(value, "none")) {
-        vms->iommu = VIRT_IOMMU_NONE;
+        iort_config->iommu_type = ACPI_IORT_IOMMU_NONE;
     } else {
         error_setg(errp, "Invalid iommu value");
         error_append_hint(errp, "Valid values are none, smmuv3.\n");
@@ -2004,8 +2009,9 @@ static void virt_machine_device_plug_cb(HotplugHandler *hotplug_dev,
     if (object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_IOMMU_PCI)) {
         PCIDevice *pdev = PCI_DEVICE(dev);
 
-        vms->iommu = VIRT_IOMMU_VIRTIO;
-        vms->virtio_iommu_bdf = pci_get_bdf(pdev);
+        vms->iort_config.node_bitmap |= ACPI_IORT_IOMMU_NODE;
+        vms->iort_config.iommu_type = ACPI_IORT_IOMMU_VIRTIO;
+        vms->iort_config.virtio_iommu_config.bdf = pci_get_bdf(pdev);
         create_virtio_iommu(vms, errp);
     }
 }
@@ -2152,7 +2158,7 @@ static void virt_instance_init(Object *obj)
     }
 
     /* Default disallows iommu instantiation */
-    vms->iommu = VIRT_IOMMU_NONE;
+    vms->iort_config.iommu_type = ACPI_IORT_IOMMU_NONE;
     object_property_add_str(obj, "iommu", virt_get_iommu, virt_set_iommu, NULL);
     object_property_set_description(obj, "iommu",
                                     "Set the IOMMU type. "
