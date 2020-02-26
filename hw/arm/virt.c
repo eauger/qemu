@@ -1554,6 +1554,33 @@ static void machvirt_init(MachineState *machine)
                 }
             }
         }
+    } else if (kvm_enabled()) {
+        int probe_bitmap = kvm_arm_vgic_probe();
+
+        if (!probe_bitmap) {
+            error_report(
+                "Unable to determine GIC version supported by host");
+            exit(1);
+        }
+        if (!vms->gic_version_user_selected) {
+            /*
+             * by default v2 is supposed to be chosen: check it is
+             * supported by the host. Otherwise take v3.
+             */
+            if (probe_bitmap & KVM_ARM_VGIC_V2) {
+                vms->gic_version = 2;
+            } else if (probe_bitmap & KVM_ARM_VGIC_V3) {
+                vms->gic_version = 3;
+            }
+        } else { /* user explicitly set the version to 2 or 3 */
+            if (vms->gic_version == 2 && !(probe_bitmap & KVM_ARM_VGIC_V2)) {
+                error_report("GICv2 is not supported by the host");
+                exit(1);
+            } else if (vms->gic_version == 3 && !(probe_bitmap & KVM_ARM_VGIC_V3)) {
+                error_report("GICv3 is not supported by the host");
+                exit(1);
+            }
+        }
     }
 
     if (!cpu_type_valid(machine->cpu_type)) {
@@ -1840,6 +1867,7 @@ static void virt_set_gic_version(Object *obj, const char *value, Error **errp)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
 
+    vms->gic_version_user_selected = true;
     if (!strcmp(value, "3")) {
         vms->gic_version = 3;
     } else if (!strcmp(value, "2")) {
@@ -1851,6 +1879,7 @@ static void virt_set_gic_version(Object *obj, const char *value, Error **errp)
     } else {
         error_setg(errp, "Invalid gic-version value");
         error_append_hint(errp, "Valid values are 3, 2, host, max.\n");
+        vms->gic_version_user_selected = false;
     }
 }
 
@@ -2103,6 +2132,7 @@ static void virt_instance_init(Object *obj)
                                     NULL);
     /* Default GIC type is v2 */
     vms->gic_version = 2;
+    vms->gic_version_user_selected = false;
     object_property_add_str(obj, "gic-version", virt_get_gic_version,
                         virt_set_gic_version, NULL);
     object_property_set_description(obj, "gic-version",

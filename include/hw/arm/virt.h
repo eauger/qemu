@@ -124,6 +124,7 @@ typedef struct {
     bool its;
     bool virt;
     int32_t gic_version;
+    bool gic_version_user_selected;
     VirtIOMMUType iommu;
     struct arm_boot_info bootinfo;
     MemMapEntry *memmap;
