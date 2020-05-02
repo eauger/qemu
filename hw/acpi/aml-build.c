@@ -1882,12 +1882,13 @@ void build_tpm2(GArray *table_data, BIOSLinker *linker, GArray *tcpalog)
     unsigned log_addr_size = sizeof(tpm2_ptr->log_area_start_address);
     unsigned log_addr_offset =
         (char *)&tpm2_ptr->log_area_start_address - table_data->data;
+    TPMIf *tpmif = tpm_find();
 
     tpm2_ptr->platform_class = cpu_to_le16(TPM2_ACPI_CLASS_CLIENT);
-    if (TPM_IS_TIS_ISA(tpm_find())) {
+    if (TPM_IS_TIS_ISA(tpmif) || TPM_IS_TIS_SYSBUS(tpmif)) {
         tpm2_ptr->control_area_address = cpu_to_le64(0);
         tpm2_ptr->start_method = cpu_to_le32(TPM2_START_METHOD_MMIO);
-    } else if (TPM_IS_CRB(tpm_find())) {
+    } else if (TPM_IS_CRB(tpmif)) {
         tpm2_ptr->control_area_address = cpu_to_le64(TPM_CRB_ADDR_CTRL);
         tpm2_ptr->start_method = cpu_to_le32(TPM2_START_METHOD_CRB);
     } else {

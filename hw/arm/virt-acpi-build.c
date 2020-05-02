@@ -41,11 +41,13 @@
 #include "hw/acpi/pci.h"
 #include "hw/acpi/memory_hotplug.h"
 #include "hw/acpi/generic_event_device.h"
+#include "hw/acpi/tpm.h"
 #include "hw/pci/pcie_host.h"
 #include "hw/pci/pci.h"
 #include "hw/arm/virt.h"
 #include "sysemu/numa.h"
 #include "sysemu/reset.h"
+#include "sysemu/tpm.h"
 #include "kvm_arm.h"
 #include "migration/vmstate.h"
 
@@ -829,6 +831,15 @@ void virt_acpi_build(VirtMachineState *vms, AcpiBuildTables *tables)
     if (its_class_name() && !vmc->no_its) {
         acpi_add_table(table_offsets, tables_blob);
         build_iort(tables_blob, tables->linker, vms);
+    }
+
+    if (tpm_get_version(tpm_find()) == TPM_VERSION_2_0) {
+        acpi_data_push(tables->tcpalog, TPM_LOG_AREA_MINIMUM_SIZE);
+        bios_linker_loader_alloc(tables->linker, ACPI_BUILD_TPMLOG_FILE,
+                                 tables->tcpalog, 1, false);
+
+        acpi_add_table(table_offsets, tables_blob);
+        build_tpm2(tables_blob, tables->linker, tables->tcpalog);
     }
 
     /* XSDT is pointed to by RSDP */
