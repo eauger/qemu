@@ -822,6 +822,8 @@ struct ARMCPU {
     bool has_el3;
     /* CPU has PMU (Performance Monitor Unit) */
     bool has_pmu;
+    /* CPU has SPE (Statistical Profiling Extension) */
+    bool has_spe;
     /* CPU has VFP */
     bool has_vfp;
     /* CPU has Neon */
@@ -1959,6 +1961,7 @@ enum arm_features {
     ARM_FEATURE_VBAR, /* has cp15 VBAR */
     ARM_FEATURE_M_SECURITY, /* M profile Security Extension */
     ARM_FEATURE_M_MAIN, /* M profile Main Extension */
+    ARM_FEATURE_SPE, /* has SPE support */
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)
