@@ -1122,6 +1122,29 @@ static void arm_set_pmu(Object *obj, bool value, Error **errp)
     cpu->has_pmu = value;
 }
 
+static bool arm_get_spe(Object *obj, Error **errp)
+{
+    ARMCPU *cpu = ARM_CPU(obj);
+
+    return cpu->has_spe;
+}
+
+static void arm_set_spe(Object *obj, bool value, Error **errp)
+{
+    ARMCPU *cpu = ARM_CPU(obj);
+
+    if (value) {
+        if (kvm_enabled() && !kvm_arm_spe_supported()) {
+            error_setg(errp, "'spe' feature not supported by KVM on this host");
+            return;
+        }
+        set_feature(&cpu->env, ARM_FEATURE_SPE);
+    } else {
+        unset_feature(&cpu->env, ARM_FEATURE_SPE);
+    }
+    cpu->has_spe = value;
+}
+
 unsigned int gt_cntfrq_period_ns(ARMCPU *cpu)
 {
     /*
@@ -1193,6 +1216,11 @@ void arm_cpu_post_init(Object *obj)
     if (arm_feature(&cpu->env, ARM_FEATURE_PMU)) {
         cpu->has_pmu = true;
         object_property_add_bool(obj, "pmu", arm_get_pmu, arm_set_pmu);
+    }
+
+    if (arm_feature(&cpu->env, ARM_FEATURE_SPE)) {
+        cpu->has_spe = true;
+        object_property_add_bool(obj, "spe", arm_get_spe, arm_set_spe);
     }
 
     /*
