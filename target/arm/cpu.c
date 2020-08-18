@@ -1719,6 +1719,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
         cpu->pmceid1 = 0;
     }
 
+    if (!cpu->has_spe || !kvm_enabled()) {
+        unset_feature(env, ARM_FEATURE_SPE);
+    }
+
     if (!arm_feature(env, ARM_FEATURE_EL2)) {
         /* Disable the hypervisor feature bits in the processor feature
          * registers if we don't have EL2. These are id_pfr1[15:12] and
