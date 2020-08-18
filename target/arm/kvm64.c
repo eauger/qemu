@@ -715,6 +715,7 @@ bool kvm_arm_get_host_cpu_features(ARMHostCPUFeatures *ahcf)
     features |= 1ULL << ARM_FEATURE_AARCH64;
     features |= 1ULL << ARM_FEATURE_PMU;
     features |= 1ULL << ARM_FEATURE_GENERIC_TIMER;
+    features |= 1ULL << ARM_FEATURE_SPE;
 
     ahcf->features = features;
 
@@ -861,6 +862,14 @@ int kvm_arch_init_vcpu(CPUState *cs)
         cpu->kvm_init_features[0] |= 1 << KVM_ARM_VCPU_PMU_V3;
     } else {
         env->features &= ~(1ULL << ARM_FEATURE_PMU);
+    }
+    if (!kvm_check_extension(cs->kvm_state, KVM_CAP_ARM_SPE_V1)) {
+        cpu->has_spe = false;
+    }
+    if (cpu->has_spe) {
+        cpu->kvm_init_features[0] |= 1 << KVM_ARM_VCPU_SPE_V1;
+    } else {
+        env->features &= ~(1ULL << ARM_FEATURE_SPE);
     }
     if (cpu_isar_feature(aa64_sve, cpu)) {
         assert(kvm_arm_sve_supported());
