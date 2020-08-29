@@ -666,6 +666,9 @@ build_madt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
         if (arm_feature(&armcpu->env, ARM_FEATURE_PMU)) {
             gicc->performance_interrupt = cpu_to_le32(PPI(VIRTUAL_PMU_IRQ));
         }
+	error_report("%s ARM_FEATURE_SPE = %d PPI=%d\n", __func__,
+               arm_feature(&armcpu->env, ARM_FEATURE_SPE),
+	       PPI(VIRTUAL_SPE_IRQ));
         if (arm_feature(&armcpu->env, ARM_FEATURE_SPE)) {
             gicc->spe_interrupt = cpu_to_le32(PPI(VIRTUAL_SPE_IRQ));
         }

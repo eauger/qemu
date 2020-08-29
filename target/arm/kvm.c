@@ -216,7 +216,10 @@ bool kvm_arm_pmu_supported(void)
 
 bool kvm_arm_spe_supported(void)
 {
-    return kvm_check_extension(kvm_state, KVM_CAP_ARM_SPE_V1);
+    bool spe_supported = kvm_check_extension(kvm_state, KVM_CAP_ARM_SPE_V1);
+
+    error_report("%s SPE supported=%d\n", __func__, spe_supported);
+    return spe_supported;
 }
 
 int kvm_arm_get_max_vm_ipa_size(MachineState *ms)

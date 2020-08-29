@@ -828,6 +828,9 @@ int kvm_arch_init_vcpu(CPUState *cs)
     } else {
         env->features &= ~(1ULL << ARM_FEATURE_PMU);
     }
+    error_report("%s has_spe=%d\n", __func__, cpu->has_spe);
+    error_report("%s KVM_CAP_ARM_SPE_V1 check ext returns %d\n",
+		__func__, kvm_check_extension(cs->kvm_state, KVM_CAP_ARM_SPE_V1));
     if (!kvm_check_extension(cs->kvm_state, KVM_CAP_ARM_SPE_V1)) {
         cpu->has_spe = false;
     }
