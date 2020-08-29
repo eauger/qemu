@@ -302,6 +302,8 @@ struct AcpiMadtGenericCpuInterface {
     uint32_t vgic_interrupt;
     uint64_t gicr_base_address;
     uint64_t arm_mpidr;
+    uint8_t power_eff;
+    uint8_t reserved2;
     uint16_t spe_interrupt; /* ACPI 6.3 */
 } QEMU_PACKED;
 
