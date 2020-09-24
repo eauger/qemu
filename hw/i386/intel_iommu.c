@@ -1875,6 +1875,9 @@ static void vtd_context_device_invalidate(IntelIOMMUState *s,
     case 3:
         mask = 7;   /* Mask bit 2:0 in the SID field */
         break;
+    default:
+        mask = 0;
+        break;
     }
     mask = ~mask;
 
