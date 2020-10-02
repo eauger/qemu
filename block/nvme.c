@@ -728,10 +728,10 @@ static int nvme_init(BlockDriverState *bs, const char *device, int namespace,
         goto out;
     }
 
-    s->page_size = MAX(4096, 1 << (12 + ((cap >> 48) & 0xF)));
-    s->doorbell_scale = (4 << (((cap >> 32) & 0xF))) / sizeof(uint32_t);
+    s->page_size = MAX(4096, 1 << (12 + NVME_CAP_MPSMIN(cap)));
+    s->doorbell_scale = (4 << ((NVME_CAP_DSTRD(cap)))) / sizeof(uint32_t);
     bs->bl.opt_mem_alignment = s->page_size;
-    timeout_ms = MIN(500 * ((cap >> 24) & 0xFF), 30000);
+    timeout_ms = MIN(500 * NVME_CAP_TO(cap), 30000);
 
     /* Reset device to get a clean state. */
     s->regs->ctrl.cc = cpu_to_le32(le32_to_cpu(s->regs->ctrl.cc) & 0xFE);
