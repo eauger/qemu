@@ -205,24 +205,24 @@ static NVMeQueuePair *nvme_create_queue_pair(BDRVNVMeState *s,
     Error *local_err = NULL;
     NVMeQueuePair *q;
     uint64_t prp_list_iova;
+    size_t bytes;
 
     q = g_try_new0(NVMeQueuePair, 1);
     if (!q) {
         return NULL;
     }
-    q->prp_list_pages = qemu_try_memalign(s->page_size,
-                                          s->page_size * NVME_NUM_REQS);
+    bytes = QEMU_ALIGN_UP(s->page_size * NVME_NUM_REQS, qemu_real_host_page_size);
+    q->prp_list_pages = qemu_try_memalign(qemu_real_host_page_size, bytes);
     if (!q->prp_list_pages) {
         goto fail;
     }
-    memset(q->prp_list_pages, 0, s->page_size * NVME_NUM_REQS);
+    memset(q->prp_list_pages, 0, bytes);
     qemu_mutex_init(&q->lock);
     q->s = s;
     q->index = idx;
     qemu_co_queue_init(&q->free_req_queue);
     q->completion_bh = aio_bh_new(aio_context, nvme_process_completion_bh, q);
-    r = qemu_vfio_dma_map(s->vfio, q->prp_list_pages,
-                          s->page_size * NVME_NUM_REQS,
+    r = qemu_vfio_dma_map(s->vfio, q->prp_list_pages, bytes,
                           false, &prp_list_iova);
     if (r) {
         goto fail;
