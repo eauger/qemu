@@ -843,6 +843,33 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
     memory_region_notify_iommu_one(n, &event);
 }
 
+/**
+ * smmuv3_notify_asid - call the notifier @n for a given asid
+ *
+ * @mr: IOMMU mr region handle
+ * @n: notifier to be called
+ * @asid: address space ID or negative value if we don't care
+ */
+static void smmuv3_notify_asid(SMMUDevice *sdev, IOMMUMemoryRegion *mr,
+                               IOMMUNotifier *n, int asid)
+{
+    struct iommu_cache_invalidate_info cache_info = {};
+
+    cache_info.version = IOMMU_CACHE_INVALIDATE_INFO_VERSION_1;
+    cache_info.cache = IOMMU_CACHE_INV_TYPE_IOTLB;
+    cache_info.granularity = IOMMU_INV_GRANU_PASID;
+    cache_info.granu.addr_info.flags = IOMMU_INV_ADDR_FLAGS_ARCHID;
+    cache_info.granu.addr_info.archid = asid;
+    cache_info.granu.addr_info.addr = n->start;
+    cache_info.granu.addr_info.granule_size = n->end - n->start;
+    cache_info.granu.addr_info.nb_granules = 1;
+
+    if (smmu_iommu_invalidate_cache(sdev, &cache_info)) {
+        error_report("Cache flush failed");
+    }
+}
+
+
 /* invalidate an asid/iova range tuple in all mr's */
 static void smmuv3_inv_notifiers_iova(SMMUState *s, int asid, dma_addr_t iova,
                                       uint8_t tg, uint64_t num_pages)
@@ -977,6 +1004,22 @@ smmuv3_invalidate_ste(gpointer key, gpointer value, gpointer user_data)
     return true;
 }
 
+static void smmuv3_s1_asid_inval(SMMUState *s, uint16_t asid)
+{
+    SMMUDevice *sdev;
+
+    trace_smmuv3_s1_asid_inval(asid);
+    QLIST_FOREACH(sdev, &s->devices_with_notifiers, next) {
+        IOMMUMemoryRegion *mr = &sdev->iommu;
+        IOMMUNotifier *n;
+
+        IOMMU_NOTIFIER_FOREACH(n, mr) {
+            smmuv3_notify_asid(sdev, mr, n, asid);
+        }
+    }
+    smmu_iotlb_inv_asid(s, asid);
+}
+
 static int smmuv3_cmdq_consume(SMMUv3State *s)
 {
     SMMUState *bs = ARM_SMMU(s);
@@ -1084,8 +1127,7 @@ static int smmuv3_cmdq_consume(SMMUv3State *s)
             uint16_t asid = CMD_ASID(&cmd);
 
             trace_smmuv3_cmdq_tlbi_nh_asid(asid);
-            smmu_inv_notifiers_all(&s->smmu_state);
-            smmu_iotlb_inv_asid(bs, asid);
+            smmuv3_s1_asid_inval(bs, asid);
             break;
         }
         case SMMU_CMD_TLBI_NH_ALL:
