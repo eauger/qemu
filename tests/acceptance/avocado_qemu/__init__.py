@@ -1,6 +1,3 @@
-# Test class and utilities for functional tests
-#
-# Copyright (c) 2018 Red Hat, Inc.
 #
 # Author:
 #  Cleber Rosa <crosa@redhat.com>
@@ -306,15 +303,50 @@ KNOWN_DISTROS = {
             'x86_64':
             {'checksum': 'e3c1b309d9203604922d6e255c2c5d098a309c2d46215d8fc026954f3c5c27a0'},
             'aarch64':
-            {'checksum': '1e18d9c0cf734940c4b5d5ec592facaed2af0ad0329383d5639c997fdf16fe49'},
+            {'checksum': '1e18d9c0cf734940c4b5d5ec592facaed2af0ad0329383d5639c997fdf16fe49',
+             'pxeboot_url': "https://archives.fedoraproject.org/pub/archive/fedora/"
+                            "linux/releases/31/Everything/aarch64/os/images/pxeboot/",
+             'kernel_params': "root=UUID=b6950a44-9f3c-4076-a9c2-355e8475b0a7 ro "
+                              "earlyprintk=pl011,0x9000000 ignore_loglevel "
+                              "no_timer_check printk.time=1 rd_NO_PLYMOUTH "
+                              "console=ttyAMA0 "},
             'ppc64':
             {'checksum': '7c3528b85a3df4b2306e892199a9e1e43f991c506f2cc390dc4efa2026ad2f58'},
             's390x':
             {'checksum': '4caaab5a434fd4d1079149a072fdc7891e354f834d355069ca982fdcaf5a122d'},
             }
+        ,
+        '32': {
+            'aarch64':
+            { 'kernel_params': "root=UUID=3df75b65-be8d-4db4-8655-14d95c0e90c5 ro "
+                              "no_timer_check net.ifnames=0 console=tty1 "
+                              "console=ttyS0,115200n8 ",
+              'pxeboot_url':  "https://ftp.lip6.fr/ftp/pub/linux/distributions/fedora/releases/"
+                              "32/Server/aarch64/os/images/pxeboot/"},
+            }
+        ,
+        '33': {
+            'aarch64':
+            { 'kernel_params': "root=UUID=d20b3ffa-6397-4a63-a734-1126a0208f8a ro "
+                              "no_timer_check net.ifnames=0 console=tty1 "
+                              "console=ttyS0,115200n8 console=tty0 ",
+              'pxeboot_url':  "https://ftp.lip6.fr/ftp/pub/linux/distributions/fedora/releases/"
+                              "33/Server/aarch64/os/images/pxeboot/"},
+            }
         }
     }
 
+def get_known_distro_kernel_params(distro, distro_version, arch):
+    try:
+        return KNOWN_DISTROS.get(distro).get(distro_version).get(arch).get('kernel_params')
+    except AttributeError:
+        return None
+
+def get_known_distro_pxeboot_url(distro, distro_version, arch):
+    try:
+        return KNOWN_DISTROS.get(distro).get(distro_version).get(arch).get('pxeboot_url')
+    except AttributeError:
+        return None
 
 def get_known_distro_checksum(distro, distro_version, arch):
     try:
@@ -447,6 +479,12 @@ class LinuxTest(Test, LinuxSSHMixIn):
     def set_up_cloudinit(self, ssh_pubkey=None):
         cloudinit_iso = self.prepare_cloudinit(ssh_pubkey)
         self.vm.add_args('-drive', 'file=%s,format=raw' % cloudinit_iso)
+
+    def get_default_kernel_params(self):
+        return get_known_distro_kernel_params(self.distro, self.distro_version, self.arch)
+
+    def get_pxeboot_url(self):
+        return get_known_distro_pxeboot_url(self.distro, self.distro_version, self.arch)
 
     def launch_and_wait(self, set_up_ssh_connection=True):
         self.vm.set_console()
