@@ -53,8 +53,8 @@ class SMMU(LinuxTest):
         if custom_kernel is False:
             return
 
-        kernel_url = self.get_pxeboot_url() + 'vmlinuz'
-        initrd_url = self.get_pxeboot_url() + 'initrd.img'
+        kernel_url = self.distro.pxeboot_url + 'vmlinuz'
+        initrd_url = self.distro.pxeboot_url + 'initrd.img'
         self.kernel_path = self.fetch_asset(kernel_url)
         self.initrd_path = self.fetch_asset(initrd_url)
 
@@ -86,7 +86,7 @@ class SMMU(LinuxTest):
         :avocado: tags=distro_version:31
         """
         self.common_vm_setup(True)
-        self.kernel_params = self.get_default_kernel_params() + ' iommu.passthrough=on'
+        self.kernel_params = self.distro.default_kernel_params + ' iommu.passthrough=on'
         self.run_and_check()
 
     def test_smmu_noril_nostrict(self):
@@ -96,7 +96,7 @@ class SMMU(LinuxTest):
         :avocado: tags=distro_version:31
         """
         self.common_vm_setup(True)
-        self.kernel_params = self.get_default_kernel_params() + ' iommu.strict=0'
+        self.kernel_params = self.distro.default_kernel_params + ' iommu.strict=0'
         self.run_and_check()
 
     # 5.8 kernel featuring range invalidation
@@ -118,7 +118,7 @@ class SMMU(LinuxTest):
         :avocado: tags=distro_version:33
         """
         self.common_vm_setup(True)
-        self.kernel_params = self.get_default_kernel_params() + ' iommu.passthrough=on'
+        self.kernel_params = self.distro.default_kernel_params + ' iommu.passthrough=on'
         self.run_and_check()
 
     def test_smmu_ril_nostrict(self):
@@ -128,5 +128,5 @@ class SMMU(LinuxTest):
         :avocado: tags=distro_version:33
         """
         self.common_vm_setup(True)
-        self.kernel_params = self.get_default_kernel_params() + ' iommu.strict=0'
+        self.kernel_params = self.distro.default_kernel_params + ' iommu.strict=0'
         self.run_and_check()

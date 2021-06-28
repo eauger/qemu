@@ -53,8 +53,8 @@ class INTEL_IOMMU(LinuxTest):
         if custom_kernel is None:
             return
 
-        kernel_url = self.get_pxeboot_url() + 'vmlinuz'
-        initrd_url = self.get_pxeboot_url() + 'initrd.img'
+        kernel_url = self.distro.pxeboot_url + 'vmlinuz'
+        initrd_url = self.distro.pxeboot_url + 'initrd.img'
         self.kernel_path = self.fetch_asset(kernel_url)
         self.initrd_path = self.fetch_asset(initrd_url)
 
@@ -78,7 +78,7 @@ class INTEL_IOMMU(LinuxTest):
         self.vm.add_args('-device', 'intel-iommu,intremap=on')
         self.vm.add_args('-machine', 'kernel_irqchip=split')
 
-        self.kernel_params = self.get_default_kernel_params() + ' quiet intel_iommu=on'
+        self.kernel_params = self.distro.default_kernel_params + ' quiet intel_iommu=on'
         self.run_and_check()
 
     def test_intel_iommu_strict(self):
@@ -89,7 +89,7 @@ class INTEL_IOMMU(LinuxTest):
         self.common_vm_setup(True)
         self.vm.add_args('-device', 'intel-iommu,intremap=on')
         self.vm.add_args('-machine', 'kernel_irqchip=split')
-        self.kernel_params = self.get_default_kernel_params() + ' quiet intel_iommu=on,strict'
+        self.kernel_params = self.distro.default_kernel_params + ' quiet intel_iommu=on,strict'
         self.run_and_check()
 
     def test_intel_iommu_strict_cm(self):
@@ -100,7 +100,7 @@ class INTEL_IOMMU(LinuxTest):
         self.common_vm_setup(True)
         self.vm.add_args('-device', 'intel-iommu,intremap=on,caching-mode=on')
         self.vm.add_args('-machine', 'kernel_irqchip=split')
-        self.kernel_params = self.get_default_kernel_params() + ' quiet intel_iommu=on,strict'
+        self.kernel_params = self.distro.default_kernel_params + ' quiet intel_iommu=on,strict'
         self.run_and_check()
 
     def test_intel_iommu_pt(self):
@@ -111,5 +111,5 @@ class INTEL_IOMMU(LinuxTest):
         self.common_vm_setup(True)
         self.vm.add_args('-device', 'intel-iommu,intremap=on')
         self.vm.add_args('-machine', 'kernel_irqchip=split')
-        self.kernel_params = self.get_default_kernel_params() + ' quiet intel_iommu=on iommu=pt'
+        self.kernel_params = self.distro.default_kernel_params + ' quiet intel_iommu=on iommu=pt'
         self.run_and_check()
