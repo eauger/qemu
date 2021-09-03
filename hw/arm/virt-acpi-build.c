@@ -512,6 +512,65 @@ build_gtdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     acpi_table_composed(linker, &table);
 }
 
+/* Debug Port Table 2 (DBG2) */
+static void
+build_dbg2(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
+{
+    AcpiTable table = { .sig = "DBG2", .rev = 3, .oem_id = vms->oem_id,
+                        .oem_table_id = vms->oem_table_id };
+    int dbg2devicelength, baseaddroffset = 22, namespace_length;
+    char name[] = "COM0";
+
+    acpi_init_table(&table, table_data);
+
+    namespace_length = sizeof name;
+    dbg2devicelength = baseaddroffset +
+                       sizeof(struct AcpiGenericAddress) + 4 + namespace_length;
+
+    /* offset to the first debug struct */
+    build_append_int_noprefix(table_data, 44, 4);
+    /* number of debug device info struct entries */
+    build_append_int_noprefix(table_data, 1, 4);
+
+    /* debug device info structure */
+    /* revision */
+    build_append_int_noprefix(table_data, 0, 1);
+    /* length */
+    build_append_int_noprefix(table_data, dbg2devicelength, 2);
+    /* register count */
+    build_append_int_noprefix(table_data, 1, 1);
+    /* name path length */
+    build_append_int_noprefix(table_data, namespace_length, 2);
+    /* name path offset */
+    build_append_int_noprefix(table_data, 38, 2);
+    /* oem data length */
+    build_append_int_noprefix(table_data, 0, 2);
+    /* oem data offset (0 means no OEM data) */
+    build_append_int_noprefix(table_data, 0, 2);
+    /* port type (serial port) */
+    build_append_int_noprefix(table_data, 0x8000, 2);
+    /* port subtype (ARM PL011)*/
+    build_append_int_noprefix(table_data, 0x3, 2);
+    /* reserved */
+    build_append_int_noprefix(table_data, 0, 2);
+    /* base address offset */
+    build_append_int_noprefix(table_data, 22, 2);
+    /* address size offset */
+    build_append_int_noprefix(table_data, 34, 2);
+
+    /* BaseAddressRegister */
+    build_append_gas(table_data, AML_AS_SYSTEM_MEMORY, 8, 0, 1,
+                     vms->memmap[VIRT_UART].base);
+
+    /* AddressSize (PL011 UART length) */
+    build_append_int_noprefix(table_data, 0x1000, 4);
+
+    /* NamespaceString */
+    g_array_append_vals(table_data, name, namespace_length);
+
+    acpi_table_composed(linker, &table);
+};
+
 /*
  * ACPI spec, Revision 5.1 Errata A
  * 5.2.12 Multiple APIC Description Table (MADT)
@@ -770,7 +829,7 @@ void virt_acpi_build(VirtMachineState *vms, AcpiBuildTables *tables)
     dsdt = tables_blob->len;
     build_dsdt(tables_blob, tables->linker, vms);
 
-    /* FADT MADT GTDT MCFG SPCR pointed to by RSDT */
+    /* FADT MADT GTDT MCFG SPCR DBG2 pointed to by RSDT */
     acpi_add_table(table_offsets, tables_blob);
     build_fadt_rev5(tables_blob, tables->linker, vms, dsdt);
 
@@ -792,6 +851,9 @@ void virt_acpi_build(VirtMachineState *vms, AcpiBuildTables *tables)
 
     acpi_add_table(table_offsets, tables_blob);
     build_spcr(tables_blob, tables->linker, vms);
+
+    acpi_add_table(table_offsets, tables_blob);
+    build_dbg2(tables_blob, tables->linker, vms);
 
     if (vms->ras) {
         build_ghes_error_table(tables->hardware_errors, tables->linker);
