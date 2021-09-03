@@ -572,7 +572,7 @@ build_madt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
              * 5.2.12.18 GIC ITS Structure
              */
             build_append_int_noprefix(table_data, 0xF, 1);  /* Type */
-            build_append_int_noprefix(table_data, 16, 1);   /* Length */
+            build_append_int_noprefix(table_data, 20, 1);   /* Length */
             build_append_int_noprefix(table_data, 0, 2);    /* Reserved */
             build_append_int_noprefix(table_data, 0, 4);    /* GIC ITS ID */
             /* Physical Base Address */
