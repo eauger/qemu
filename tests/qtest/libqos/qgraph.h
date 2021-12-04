@@ -284,6 +284,9 @@ void qos_node_contains(const char *container, const char *contained,
  */
 void qos_node_produces(const char *producer, const char *interface);
 
+void qos_node_produces_opts(const char *producer, const char *interface,
+                            QOSGraphEdgeOptions *opts);
+
 /**
  * qos_node_consumes():  creates an edge of type QEDGE_CONSUMED_BY and
  * adds it to the edge list mapped to @interface in the
