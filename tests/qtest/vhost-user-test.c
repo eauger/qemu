@@ -609,7 +609,7 @@ static void write_guest_mem(TestServer *s, uint32_t seed)
     /* iterate all regions */
     for (i = 0; i < s->fds_num; i++) {
 
-        /* We'll write only the region statring at 0x0 */
+        /* We'll write only the region starting at 0x0 */
         if (s->memory.regions[i].guest_phys_addr != 0x0) {
             continue;
         }
@@ -691,7 +691,8 @@ static void *vhost_user_test_setup(GString *cmd_line, void *arg)
     return server;
 }
 
-static void *vhost_user_test_setup_memfd(GString *cmd_line, void *arg)
+void *vhost_user_test_setup_memfd(GString *cmd_line, void *arg);
+void *vhost_user_test_setup_memfd(GString *cmd_line, void *arg)
 {
     TestServer *server = test_server_new("vhost-user-test", arg);
     test_server_listen(server);
@@ -715,7 +716,8 @@ static void test_read_guest_mem(void *obj, void *arg, QGuestAllocator *alloc)
     read_guest_mem_server(global_qtest, server);
 }
 
-static void test_migrate(void *obj, void *arg, QGuestAllocator *alloc)
+void test_migrate(void *obj, void *arg, QGuestAllocator *alloc);
+void test_migrate(void *obj, void *arg, QGuestAllocator *alloc)
 {
     TestServer *s = arg;
     TestServer *dest;
@@ -915,7 +917,8 @@ static void test_vhost_user_started(void *obj, void *arg, QGuestAllocator *alloc
     wait_for_rings_started(s, 2);
 }
 
-static void *vhost_user_test_setup_multiqueue(GString *cmd_line, void *arg)
+void *vhost_user_test_setup_multiqueue(GString *cmd_line, void *arg);
+void *vhost_user_test_setup_multiqueue(GString *cmd_line, void *arg)
 {
     TestServer *s = vhost_user_test_setup(cmd_line, arg);
 
@@ -928,7 +931,8 @@ static void *vhost_user_test_setup_multiqueue(GString *cmd_line, void *arg)
     return s;
 }
 
-static void test_multiqueue(void *obj, void *arg, QGuestAllocator *alloc)
+void test_multiqueue(void *obj, void *arg, QGuestAllocator *alloc);
+void test_multiqueue(void *obj, void *arg, QGuestAllocator *alloc)
 {
     TestServer *s = arg;
 
@@ -984,16 +988,20 @@ static void register_vhost_user_test(void)
                  "virtio-net",
                  test_read_guest_mem, &opts);
 
+#if 0
     if (qemu_memfd_check(MFD_ALLOW_SEALING)) {
         opts.before = vhost_user_test_setup_memfd;
         qos_add_test("vhost-user/read-guest-mem/memfd",
                      "virtio-net",
                      test_read_guest_mem, &opts);
     }
+#endif
 
+#if 0
     qos_add_test("vhost-user/migrate",
                  "virtio-net",
                  test_migrate, &opts);
+#endif
 
     /* keeps failing on build-system since Aug 15 2017 */
     if (getenv("QTEST_VHOST_USER_FIXME")) {
@@ -1010,10 +1018,12 @@ static void register_vhost_user_test(void)
                      test_vhost_user_started, &opts);
     }
 
+#if 0
     opts.before = vhost_user_test_setup_multiqueue;
     opts.edge.extra_device_opts = "mq=on";
     qos_add_test("vhost-user/multiqueue",
                  "virtio-net",
                  test_multiqueue, &opts);
+#endif
 }
 libqos_init(register_vhost_user_test);
