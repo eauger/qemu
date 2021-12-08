@@ -186,8 +186,11 @@ static void subprocess_run_one_test(const void *arg)
 {
     const gchar *path = arg;
 
+    fprintf(stderr, "%s path=%s\n", __func__, path);
     g_test_trap_subprocess(path, 0, G_TEST_SUBPROCESS_INHERIT_STDERR);
+    fprintf(stderr, "%s after trap subprocess path=%s\n", __func__, path);
     g_test_trap_assert_passed();
+    fprintf(stderr, "%s after trap assert subprocess path=%s\n", __func__, path);
 }
 
 /*

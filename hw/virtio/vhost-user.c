@@ -1470,6 +1470,7 @@ static int vhost_user_slave_handle_config_change(struct vhost_dev *dev)
 {
     int ret = -1;
 
+    error_report("%s\n", __func__);
     if (!dev->config_ops) {
         return -1;
     }
@@ -2193,6 +2194,8 @@ static int vhost_user_get_config(struct vhost_dev *dev, uint8_t *config,
         .hdr.size = VHOST_USER_CONFIG_HDR_SIZE + config_len,
     };
 
+    error_report("%s\n", __func__);
+
     if (!virtio_has_feature(dev->protocol_features,
                 VHOST_USER_PROTOCOL_F_CONFIG)) {
         error_setg(errp, "VHOST_USER_PROTOCOL_F_CONFIG not supported");
@@ -2236,6 +2239,8 @@ static int vhost_user_set_config(struct vhost_dev *dev, const uint8_t *data,
     uint8_t *p;
     bool reply_supported = virtio_has_feature(dev->protocol_features,
                                               VHOST_USER_PROTOCOL_F_REPLY_ACK);
+
+    error_report("%s\n", __func__);
 
     VhostUserMsg msg = {
         .hdr.request = VHOST_USER_SET_CONFIG,

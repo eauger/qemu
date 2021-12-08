@@ -327,6 +327,7 @@ static void virtio_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         }
         break;
     case VIRTIO_PCI_STATUS:
+	error_report("%s VIRTIO_PCI_STATE val=%d\n", __func__, val);
         if (!(val & VIRTIO_CONFIG_S_DRIVER_OK)) {
             virtio_pci_stop_ioeventfd(proxy);
         }
@@ -398,6 +399,7 @@ static uint32_t virtio_ioport_read(VirtIOPCIProxy *proxy, uint32_t addr)
         break;
     case VIRTIO_PCI_STATUS:
         ret = vdev->status;
+	error_report("%s VIRTIO_PCI_STATUS=%d\n", __func__, ret);
         break;
     case VIRTIO_PCI_ISR:
         /* reading from the ISR also clears it. */
@@ -460,6 +462,8 @@ static void virtio_pci_config_write(void *opaque, hwaddr addr,
     VirtIOPCIProxy *proxy = opaque;
     uint32_t config = VIRTIO_PCI_CONFIG_SIZE(&proxy->pci_dev);
     VirtIODevice *vdev = virtio_bus_get_device(&proxy->bus);
+
+    error_report("%s addr=0x%"PRIx64" val=0x%"PRIx64" size=0x%x\n", __func__, addr, val, size);
 
     if (vdev == NULL) {
         return;
@@ -1624,6 +1628,8 @@ static void virtio_pci_device_plugged(DeviceState *d, Error **errp)
     uint32_t size;
     VirtIODevice *vdev = virtio_bus_get_device(&proxy->bus);
 
+    error_report("%s devfn=0x%x\n", __func__, proxy->pci_dev.devfn);
+
     /*
      * Virtio capabilities present without
      * VIRTIO_F_VERSION_1 confuses guests
@@ -1762,6 +1768,8 @@ static void virtio_pci_device_plugged(DeviceState *d, Error **errp)
                               &virtio_pci_config_ops,
                               proxy, "virtio-pci", size);
 
+	error_report("%s LEGACY bar %d size=%d PCI_BASE_ADDRESS_SPACE_IO=0x%x\n",
+			__func__, proxy->legacy_io_bar_idx, size, PCI_BASE_ADDRESS_SPACE_IO);
         pci_register_bar(&proxy->pci_dev, proxy->legacy_io_bar_idx,
                          PCI_BASE_ADDRESS_SPACE_IO, &proxy->bar);
     }

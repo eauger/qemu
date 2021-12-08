@@ -110,15 +110,29 @@ static uint8_t get_status(QVirtioDevice *d)
 {
     QVirtioPCIDevice *dev = container_of(d, QVirtioPCIDevice, vdev);
 
+#if 0
     return qpci_io_readb(dev->pdev, dev->bar, dev->common_cfg_offset +
                          offsetof(struct virtio_pci_common_cfg,
                                   device_status));
+#else
+    uint8_t val;
+
+
+    fprintf(stderr, "!!!!! MODERN %s call readb\n", __func__);
+    val = qpci_io_readb(dev->pdev, dev->bar, dev->common_cfg_offset +
+                         offsetof(struct virtio_pci_common_cfg,
+                                  device_status));
+
+    fprintf(stderr, "!!!!! MODERN %s status=%d\n", __func__, val);
+    return val;
+#endif
 }
 
 static void set_status(QVirtioDevice *d, uint8_t status)
 {
     QVirtioPCIDevice *dev = container_of(d, QVirtioPCIDevice, vdev);
 
+    fprintf(stderr, "!!!!! MODERN %s status=%d\n", __func__, status);
     return qpci_io_writeb(dev->pdev, dev->bar, dev->common_cfg_offset +
                           offsetof(struct virtio_pci_common_cfg,
                                    device_status),

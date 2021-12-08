@@ -36,6 +36,7 @@
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/module.h"
+#include "qemu/error-report.h"
 
 /****************************************************************************
  * GPEX host
@@ -111,6 +112,7 @@ static void gpex_host_realize(DeviceState *dev, Error **errp)
     memory_region_init(&s->io_mmio, OBJECT(s), "gpex_mmio", UINT64_MAX);
     memory_region_init(&s->io_ioport, OBJECT(s), "gpex_ioport", 64 * 1024);
 
+    error_report("%s allow_unmapped_accesses=%d\n", __func__, s->allow_unmapped_accesses);
     if (s->allow_unmapped_accesses) {
         memory_region_init_io(&s->io_mmio_window, OBJECT(s),
                               &unassigned_io_ops, OBJECT(s),

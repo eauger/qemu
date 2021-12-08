@@ -40,12 +40,14 @@ typedef struct MemoryRegionPortioList {
 
 static uint64_t unassigned_io_read(void *opaque, hwaddr addr, unsigned size)
 {
+    error_report("%s addr=0x%"PRIx64" size=%d\n", __func__, addr, size);
     return -1ULL;
 }
 
 static void unassigned_io_write(void *opaque, hwaddr addr, uint64_t val,
                                 unsigned size)
 {
+    error_report("%s addr=0x%"PRIx64" val=0x%"PRIx64" size=%d\n", __func__, addr, val, size);
 }
 
 const MemoryRegionOps unassigned_io_ops = {

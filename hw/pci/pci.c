@@ -311,6 +311,8 @@ static void pci_do_device_reset(PCIDevice *dev)
     pci_device_deassert_intx(dev);
     assert(dev->irq_state == 0);
 
+    error_report("%s 0x%x:0x%x", __func__, PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
+
     /* Clear all writable bits */
     pci_word_test_and_clear_mask(dev->config + PCI_COMMAND,
                                  pci_get_word(dev->wmask + PCI_COMMAND) |
@@ -1051,6 +1053,8 @@ static PCIDevice *do_pci_register_device(PCIDevice *pci_dev,
     DeviceState *dev = DEVICE(pci_dev);
     PCIBus *bus = pci_get_bus(pci_dev);
 
+    error_report("+++++++++++++++++++++ %s 0x%x:0x%x name=%s", __func__, PCI_SLOT(devfn), PCI_FUNC(devfn), name);
+
     /* Only pci bridges can be attached to extra PCI root buses */
     if (pci_bus_is_root(bus) && bus->parent_dev && !pc->is_bridge) {
         error_setg(errp,
@@ -1398,6 +1402,7 @@ static void pci_update_mappings(PCIDevice *d)
         }
         r->addr = new_addr;
         if (r->addr != PCI_BAR_UNMAPPED) {
+	    error_report("%s add_subregion_overlap 0x%x:0x%x region=%d addr=0x%"PRIx64" size=0x%"PRIx64"\n", __func__, PCI_SLOT(d->devfn), PCI_FUNC(d->devfn), i, r->addr, r->size);
             trace_pci_update_mappings_add(d, pci_dev_bus_num(d),
                                           PCI_SLOT(d->devfn),
                                           PCI_FUNC(d->devfn),

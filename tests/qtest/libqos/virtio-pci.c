@@ -110,12 +110,14 @@ static uint64_t qvirtio_pci_get_guest_features(QVirtioDevice *d)
 static uint8_t qvirtio_pci_get_status(QVirtioDevice *d)
 {
     QVirtioPCIDevice *dev = container_of(d, QVirtioPCIDevice, vdev);
+    fprintf(stderr, "**** LEGACY %s VIRTIO_PCI_STATUS=0x%x status=%d\n", __func__, VIRTIO_PCI_STATUS, qpci_io_readb(dev->pdev, dev->bar, VIRTIO_PCI_STATUS));
     return qpci_io_readb(dev->pdev, dev->bar, VIRTIO_PCI_STATUS);
 }
 
 static void qvirtio_pci_set_status(QVirtioDevice *d, uint8_t status)
 {
     QVirtioPCIDevice *dev = container_of(d, QVirtioPCIDevice, vdev);
+    fprintf(stderr, "**** LEGACY %s VIRTIO_PCI_STATUS=0x%x status=%d \n", __func__, VIRTIO_PCI_STATUS,status);
     qpci_io_writeb(dev->pdev, dev->bar, VIRTIO_PCI_STATUS, status);
 }
 
@@ -302,6 +304,7 @@ static const QVirtioPCIMSIXOps qvirtio_pci_msix_ops_legacy = {
 
 void qvirtio_pci_device_enable(QVirtioPCIDevice *d)
 {
+    fprintf(stderr, "%s devfn=0x%x\n", __func__, d->pdev->devfn);
     qpci_device_enable(d->pdev);
     d->bar = qpci_iomap(d->pdev, d->bar_idx, NULL);
 }

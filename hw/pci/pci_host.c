@@ -70,12 +70,16 @@ void pci_host_config_write_common(PCIDevice *pci_dev, uint32_t addr,
         return;
     }
 
+    error_report("%s %s addr=0x%x limit=0x%x val=0x%x len=0x%x\n", __func__,
+		    pci_dev->name, addr, limit, val, len);
     assert(len <= 4);
     /* non-zero functions are only exposed when function 0 is present,
      * allowing direct removal of unexposed functions.
      */
     if ((pci_dev->qdev.hotplugged && !pci_get_function_0(pci_dev)) ||
         !pci_dev->has_power) {
+    error_report("ABORT %s %s addr=0x%x limit=0x%x val=0x%x len=0x%x\n", __func__,
+		    pci_dev->name, addr, limit, val, len);
         return;
     }
 

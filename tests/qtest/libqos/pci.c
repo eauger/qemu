@@ -103,6 +103,7 @@ void qpci_device_enable(QPCIDevice *dev)
 {
     uint16_t cmd;
 
+    fprintf(stderr, "%s devfn=0x%x \n", __func__, dev->devfn);
     /* FIXME -- does this need to be a bus callout? */
     cmd = qpci_config_readw(dev, PCI_COMMAND);
     cmd |= PCI_COMMAND_IO | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
@@ -282,11 +283,13 @@ uint8_t qpci_io_readb(QPCIDevice *dev, QPCIBar token, uint64_t off)
     QPCIBus *bus = dev->bus;
 
     if (token.is_io) {
+	fprintf(stderr, "%s off=0x%lx value=%d\n", __func__, off, bus->pio_readb(bus, token.addr + off));
         return bus->pio_readb(bus, token.addr + off);
     } else {
         uint8_t val;
 
         bus->memread(dev->bus, token.addr + off, &val, sizeof(val));
+	fprintf(stderr, "%s MEMREAD off=0x%lx value=%d\n", __func__, off, val);
         return val;
     }
 }
@@ -339,8 +342,10 @@ void qpci_io_writeb(QPCIDevice *dev, QPCIBar token, uint64_t off,
     QPCIBus *bus = dev->bus;
 
     if (token.is_io) {
+	fprintf(stderr, "%s IO off=0x%lx value=%d\n", __func__, off, value);
         bus->pio_writeb(bus, token.addr + off, value);
     } else {
+	fprintf(stderr, "%s MEMWRITE off=0x%lx value=%d\n", __func__, off, value);
         bus->memwrite(bus, token.addr + off, &value, sizeof(value));
     }
 }
@@ -419,8 +424,10 @@ QPCIBar qpci_iomap(QPCIDevice *dev, int barno, uint64_t *sizeptr)
 
     io_type = addr & PCI_BASE_ADDRESS_SPACE;
     if (io_type == PCI_BASE_ADDRESS_SPACE_IO) {
+	fprintf(stderr, "%s devfn=%d barno=%d IO\n", __func__, dev->devfn, barno);
         addr &= PCI_BASE_ADDRESS_IO_MASK;
     } else {
+	fprintf(stderr, "%s devfn=%d barno=%d MEM\n", __func__, dev->devfn, barno);
         addr &= PCI_BASE_ADDRESS_MEM_MASK;
     }
 
@@ -439,6 +446,8 @@ QPCIBar qpci_iomap(QPCIDevice *dev, int barno, uint64_t *sizeptr)
 
         bus->pio_alloc_ptr = loc + size;
         bar.is_io = true;
+	fprintf(stderr, "%s IO devfn=%d barno=%d pio_alloc_ptr=0x%lx size=0x%x\n",
+			__func__, dev->devfn, barno, bus->pio_alloc_ptr, size);
 
         qpci_config_writel(dev, bar_reg, loc | PCI_BASE_ADDRESS_SPACE_IO);
     } else {
@@ -449,12 +458,20 @@ QPCIBar qpci_iomap(QPCIDevice *dev, int barno, uint64_t *sizeptr)
         g_assert(loc + size <= bus->mmio_limit);
 
         bus->mmio_alloc_ptr = loc + size;
+<<<<<<< HEAD
         bar.is_io = false;
+=======
+	bar.is_io = false;
+	fprintf(stderr, "%s MEMORY devfn=%d barno=%d pio_alloc_ptr=0x%lx size=0x%x\n",
+			__func__, dev->devfn, barno, bus->mmio_alloc_ptr, size);
+>>>>>>> 7f961ce6db... add traces
 
         qpci_config_writel(dev, bar_reg, loc);
     }
 
     bar.addr = loc;
+    fprintf(stderr, "%s devfn=%d barno=%d bar.addr=0x%lx\n",
+		__func__, dev->devfn, barno, bar.addr);
     return bar;
 }
 

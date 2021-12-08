@@ -18,19 +18,17 @@
 
 #include "qemu/module.h"
 
-#if 0
-#define ACPI_PCIHP_ADDR         0xae00
-#define PCI_EJ_BASE             0x0008
-#endif
-
 static uint8_t qpci_arm_pio_readb(QPCIBus *bus, uint32_t addr)
 {
+    fprintf(stderr, "%s addr=0x%x val=%d\n", __func__, addr, qtest_inb(bus->qts, addr));
     return qtest_inb(bus->qts, addr);
 }
 
 static void qpci_arm_pio_writeb(QPCIBus *bus, uint32_t addr, uint8_t val)
 {
-    qtest_outb(bus->qts, addr, val);
+    fprintf(stderr, "%s addr=0x%x val=%d\n", __func__, addr, val);
+    //qtest_memwrite(bus->qts, addr, &val, 1);
+    qtest_outb(bus->qts, addr,  val);
 }
 
 static uint16_t qpci_arm_pio_readw(QPCIBus *bus, uint32_t addr)
