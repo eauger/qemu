@@ -196,8 +196,12 @@ void qpci_free_arm(QPCIBus *bus)
 
 static void qpci_arm_register_nodes(void)
 {
+    QOSGraphEdgeOptions opts = {
+        .before_cmd_line = "-trace events=debug.txt",
+    };
+
     qos_node_create_driver("pci-bus-arm", NULL);
-    qos_node_produces_opts("pci-bus-arm", "pci-bus", NULL);
+    qos_node_produces_opts("pci-bus-arm", "pci-bus", &opts);
 }
 
 libqos_init(qpci_arm_register_nodes);
