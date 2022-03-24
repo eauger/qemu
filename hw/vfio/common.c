@@ -24,6 +24,7 @@
 #include <linux/kvm.h>
 #endif
 #include <linux/vfio.h>
+#include <linux/iommufd.h>
 
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio.h"
@@ -445,6 +446,34 @@ unmap_exit:
     return ret;
 }
 
+static int
+__dma_unmap(VFIOContainer *container, hwaddr iova, ram_addr_t size,
+            ram_addr_t *unmapped)
+{
+    int ret;
+
+    if (container->fd) {
+        struct vfio_iommu_type1_dma_unmap unmap = {
+            .argsz = sizeof(unmap),
+            .flags = 0,
+            .iova = iova,
+            .size = size,
+        };
+        ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap);
+        *unmapped = unmap.size;
+    } else {
+      struct iommu_ioas_unmap unmap = {
+          .size = size,
+          .ioas_id = container->ioas_id,
+          .iova = iova,
+          .length = size,
+      };
+      ret = ioctl(container->space->iommufd, IOMMU_IOAS_UNMAP, &unmap);
+      *unmapped = unmap.size;
+    }
+    return ret;
+}
+
 /*
  * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
  */
@@ -452,19 +481,14 @@ static int vfio_dma_unmap(VFIOContainer *container,
                           hwaddr iova, ram_addr_t size,
                           IOMMUTLBEntry *iotlb)
 {
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .flags = 0,
-        .iova = iova,
-        .size = size,
-    };
+    ram_addr_t unmapped;
 
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
 
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
+    while (__dma_unmap(container, iova, size, &unmapped)) {
         /*
          * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
          * v4.15) where an overflow in its wrap-around check prevents us from
@@ -477,10 +501,10 @@ static int vfio_dma_unmap(VFIOContainer *container,
          * is queued for kernel v5.0 so this workaround can be removed once
          * affected kernels are sufficiently deprecated.
          */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
+        if (errno == EINVAL && unmapped && !(iova + unmapped) &&
             container->iommu_type == VFIO_TYPE1v2_IOMMU) {
             trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
+            size -= 1ULL << ctz64(container->pgsizes);
             continue;
         }
         error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
@@ -490,29 +514,52 @@ static int vfio_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
+static int __dma_map(VFIOContainer *container, hwaddr iova,
+                     ram_addr_t size, void *vaddr, bool readonly)
+{
+    int ret;
+
+    if (container->fd) {
+        struct vfio_iommu_type1_dma_map map = {
+           .argsz = sizeof(map),
+           .flags = VFIO_DMA_MAP_FLAG_READ,
+           .vaddr = (__u64)(uintptr_t)vaddr,
+           .iova = iova,
+           .size = size,
+        };
+
+        if (!readonly) {
+            map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+        }
+        ret = ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map);
+    } else {
+        struct iommu_ioas_map map = {
+            .size = sizeof(struct iommu_ioas_map),
+            .flags = IOMMU_IOAS_MAP_FIXED_IOVA | IOMMU_IOAS_MAP_READABLE,
+            .ioas_id = container->ioas_id,
+            .user_va = (__u64)(uintptr_t)vaddr,
+            .length = size,
+            .iova = iova,
+        };
+        if (!readonly) {
+            map.flags |= IOMMU_IOAS_MAP_WRITEABLE;
+        }
+        ret = ioctl(container->space->iommufd, IOMMU_IOAS_MAP, &map);
+    }
+    return ret;
+}
+
 static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = VFIO_DMA_MAP_FLAG_READ,
-        .vaddr = (__u64)(uintptr_t)vaddr,
-        .iova = iova,
-        .size = size,
-    };
-
-    if (!readonly) {
-        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
-    }
-
     /*
      * Try the mapping, if it fails with EBUSY, unmap the region and try
      * again.  This shouldn't be necessary, but we sometimes see it in
      * the VGA ROM space.
      */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
+     if (!__dma_map(container, iova, size, vaddr, readonly) ||
+         (errno == EBUSY && !__dma_unmap(container, iova, size, NULL) &&
+         __dma_map(container, iova, size, vaddr, readonly))) {
         return 0;
     }
 
@@ -1840,6 +1887,14 @@ static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
     space = g_malloc0(sizeof(*space));
     space->as = as;
     QLIST_INIT(&space->containers);
+    space->iommufd = qemu_open_old("/dev/iommu", O_RDWR);
+    g_assert(space->iommufd);
+    error_report("%s /dev/iommu opened", __func__);
+
+    if (QLIST_EMPTY(&vfio_address_spaces)) {
+        qemu_register_reset(vfio_reset_handler, NULL);
+    }
+
 
     QLIST_INSERT_HEAD(&vfio_address_spaces, space, list);
 
@@ -1851,6 +1906,7 @@ static void vfio_put_address_space(VFIOAddressSpace *space)
     if (QLIST_EMPTY(&space->containers)) {
         QLIST_REMOVE(space, list);
         g_free(space);
+        qemu_unregister_reset(vfio_reset_handler, NULL);
     }
 }
 
@@ -2265,6 +2321,163 @@ static void vfio_disconnect_container(VFIOGroup *group)
     }
 }
 
+static int
+vfio_device_attach_ioas(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
+{
+    VFIOContainer *container;
+    VFIOAddressSpace *space;
+    struct iommu_ioas_alloc ioas_alloc = {
+                .size = sizeof(ioas_alloc),
+                .flags = 0,
+    };
+    struct vfio_device_attach_ioas attach_ioas = {
+                .argsz = sizeof(attach_ioas),
+                .flags = 0,
+    };
+    int ret;
+
+    error_report("%s %s", __func__, vbasedev->name);
+    space = vfio_get_address_space(as);
+
+    QLIST_FOREACH(container, &space->containers, next) {
+        struct vfio_device_attach_ioas attach_ioas = {
+                .argsz = sizeof(attach_ioas),
+                .flags = 0,
+        };
+
+        attach_ioas.iommufd = space->iommufd;
+        attach_ioas.ioas_id = container->ioas_id;
+        ret = ioctl(vbasedev->devfd, VFIO_DEVICE_ATTACH_IOAS, &attach_ioas);
+        if (!ret) {
+            QLIST_INSERT_HEAD(&container->dev_list, vbasedev, container_next);
+            return ret;
+        }
+    }
+
+    /* Alloc a new container/ioas */
+    ret = ioctl(space->iommufd, IOMMU_IOAS_ALLOC, &ioas_alloc);
+    if (ret < 0) {
+        error_report("Failed to alloc ioas (%s)", strerror(errno));
+        return ret;
+    } else {
+        error_report("Allocated ioas=%d", ioas_alloc.out_ioas_id);
+    }
+
+    attach_ioas.iommufd = space->iommufd;
+    attach_ioas.ioas_id = ioas_alloc.out_ioas_id;
+    ret = ioctl(vbasedev->devfd, VFIO_DEVICE_ATTACH_IOAS, &attach_ioas);
+    if (ret < 0) {
+        error_report("%s Failed to attach %s to ioasid=%d (%s)",
+                     __func__, vbasedev->name,
+                     ioas_alloc.out_ioas_id, strerror(errno));
+        return ret;
+    }
+    error_report("%s succesfully attached to ioas=%d",
+                 __func__, attach_ioas.out_hwpt_id);
+
+    container = g_malloc0(sizeof(*container));
+    container->space = space;
+    container->ioas_id = ioas_alloc.out_ioas_id;
+    container->fd = 0;
+    container->error = NULL;
+    container->dirty_pages_supported = false;
+    container->dma_max_mappings = 0;
+    QLIST_INIT(&container->giommu_list);
+    QLIST_INIT(&container->hostwin_list);
+    QLIST_INIT(&container->vrdl_list);
+    QLIST_INIT(&container->dev_list);
+    error_report("%s new container with ioas%d is finalized",
+                 __func__, container->ioas_id);
+    QLIST_INSERT_HEAD(&container->dev_list, vbasedev, container_next);
+
+    vfio_host_win_add(container, 0, (hwaddr)-1, 406);
+
+    /*
+     * TODO
+     * vfio_ram_block_discard_disable && vfio_ram_block_discard_disable
+     * container->iommu_type ?
+     * get_iommu_info
+     * dma_avail_ranges
+     */
+
+#if 0
+    container->prereg_listener = vfio_prereg_listener;
+    memory_listener_register(&container->prereg_listener,
+                                     &address_space_memory);
+    if (container->error) {
+        memory_listener_unregister(&container->prereg_listener);
+        ret = -1;
+        error_propagate_prepend(errp, container->error,
+                    "RAM memory listener initialization failed for prereg: ");
+        return ret;
+    }
+#endif
+    /* TODO KVM group */
+    container->listener = vfio_memory_listener;
+    memory_listener_register(&container->listener, container->space->as);
+    if (container->error) {
+        ret = -1;
+        error_propagate_prepend(errp, container->error,
+            "memory listener initialization failed: ");
+        return ret;
+    }
+
+
+    container->initialized = true;
+
+    return 0;
+}
+
+int vfio_device_bind_iommufd(VFIODevice *vbasedev, AddressSpace *as,
+                             Error **errp)
+{
+    VFIOAddressSpace *space;
+    char path[64], devpath[32], line[32] = {};
+    FILE *file;
+    int ret, major, minor;
+    struct vfio_device_bind_iommufd bind_data = {
+                .argsz = sizeof(bind_data),
+                .dev_cookie = 0xbeef,
+    };
+
+    error_report("%s sysfsdev=%s name=%s",
+                 __func__,  vbasedev->sysfsdev, vbasedev->name);
+
+    snprintf(path, sizeof(path), "%s/vfio-device/vfio0/dev",
+             vbasedev->sysfsdev);
+    error_report("%s path=%s", __func__,  path);
+    file = fopen(path, "r");
+    if (fgets(line, 32, file)) {
+        ret = sscanf(line, "%d:%d", &major, &minor);
+        error_report("%s major=%d, minor=%d ret=%d",
+                     __func__, major, minor, ret);
+    }
+
+    fclose(file);
+    snprintf(devpath, sizeof(devpath), "/dev/vfio/devices/vfio%d", minor);
+    file = fopen(devpath, "r+");
+    vbasedev->devfd = fileno(file);
+    error_report("%s open %s dev=%s devfd=%d", __func__,
+                 devpath, vbasedev->name, vbasedev->devfd);
+    space = vfio_get_address_space(as);
+
+    /* bind the device to the iommufd */
+    bind_data.iommufd = space->iommufd;
+    bind_data.flags = 0;
+    ret = ioctl(vbasedev->devfd, VFIO_DEVICE_BIND_IOMMUFD, &bind_data);
+    if (ret < 0) {
+        error_report("%s failed to bind devfd=%d to iommufd=%d",
+                     __func__, vbasedev->devfd, space->iommufd);
+            return ret;
+    }
+    vbasedev->devid = bind_data.out_devid;
+    error_report("%s succesfully bound devfd=%d to iommufd=%d: dev_id=%d",
+                 __func__, vbasedev->devfd, space->iommufd, vbasedev->devid);
+
+    ret = vfio_device_attach_ioas(vbasedev, as, errp);
+    return ret;
+}
+
 VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
 {
     VFIOGroup *group;
@@ -2315,10 +2528,6 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
         goto close_fd_exit;
     }
 
-    if (QLIST_EMPTY(&vfio_group_list)) {
-        qemu_register_reset(vfio_reset_handler, NULL);
-    }
-
     QLIST_INSERT_HEAD(&vfio_group_list, group, next);
 
     return group;
@@ -2347,10 +2556,34 @@ void vfio_put_group(VFIOGroup *group)
     trace_vfio_put_group(group->fd);
     close(group->fd);
     g_free(group);
+}
 
-    if (QLIST_EMPTY(&vfio_group_list)) {
-        qemu_unregister_reset(vfio_reset_handler, NULL);
+int vfio_get_iommufd_device(VFIODevice *vbasedev, Error **errp)
+{
+    struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
+    int ret;
+
+    ret = ioctl(vbasedev->devfd, VFIO_DEVICE_GET_INFO, &dev_info);
+    if (ret) {
+        error_setg_errno(errp, errno, "error getting device info");
+        return ret;
     }
+
+    vbasedev->fd = vbasedev->devfd;
+    vbasedev->group = 0;
+
+    vbasedev->num_irqs = dev_info.num_irqs;
+    vbasedev->num_regions = dev_info.num_regions;
+    vbasedev->flags = dev_info.flags;
+
+    trace_vfio_get_device(vbasedev->name, dev_info.flags, dev_info.num_regions,
+                          dev_info.num_irqs);
+
+    vbasedev->reset_works = !!(dev_info.flags & VFIO_DEVICE_FLAGS_RESET);
+    error_report("%s %s num_irqs=%d num_regions=%d", __func__,
+                 vbasedev->name, vbasedev->num_irqs,
+                 vbasedev->num_regions);
+    return 0;
 }
 
 int vfio_get_device(VFIOGroup *group, const char *name,
@@ -2359,7 +2592,7 @@ int vfio_get_device(VFIOGroup *group, const char *name,
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
     int ret, fd;
 
-    fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD, name);
+     fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD, name);
     if (fd < 0) {
         error_setg_errno(errp, errno, "error getting device from group %d",
                          group->groupid);

@@ -70,6 +70,7 @@ typedef struct VFIOMigration {
 
 typedef struct VFIOAddressSpace {
     AddressSpace *as;
+    int iommufd;
     QLIST_HEAD(, VFIOContainer) containers;
     QLIST_ENTRY(VFIOAddressSpace) list;
 } VFIOAddressSpace;
@@ -79,6 +80,7 @@ struct VFIOGroup;
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
+    int ioas_id;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;
@@ -92,6 +94,7 @@ typedef struct VFIOContainer {
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
+    QLIST_HEAD(, VFIODevice) dev_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
     QLIST_ENTRY(VFIOContainer) next;
 } VFIOContainer;
@@ -129,6 +132,8 @@ typedef struct VFIODevice {
     char *sysfsdev;
     char *name;
     DeviceState *dev;
+    int devfd;
+    int devid;
     int fd;
     int type;
     bool reset_works;
@@ -143,6 +148,7 @@ typedef struct VFIODevice {
     VFIOMigration *migration;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
+    QLIST_ENTRY(VFIODevice) container_next;
 } VFIODevice;
 
 struct VFIODeviceOps {
@@ -212,6 +218,8 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_get_device(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp);
+int vfio_device_bind_iommufd(VFIODevice *dev, AddressSpace *as, Error **errp);
+int vfio_get_iommufd_device(VFIODevice *vbasedev, Error **errp);
 
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
