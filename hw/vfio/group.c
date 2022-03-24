@@ -24,9 +24,11 @@
 #include <linux/kvm.h>
 #endif
 #include <linux/vfio.h>
+#include <linux/iommufd.h>
 
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio.h"
+#include "hw/iommufd/iommufd.h"
 #include "exec/address-spaces.h"
 #include "exec/memory.h"
 #include "exec/ram_addr.h"
@@ -202,6 +204,76 @@ unmap_exit:
     return ret;
 }
 
+static int
+__dma_unmap(VFIOContainer *container, hwaddr iova, ram_addr_t size,
+            ram_addr_t *unmapped)
+{
+    int ret;
+
+    if (vfio_container_iommufd_based(container)) {
+      struct iommu_ioas_unmap unmap = {
+          .size = size,
+          .ioas_id = container->ioas_id,
+          .iova = iova,
+          .length = size,
+      };
+
+      ret = ioctl(container->space->iommufd, IOMMU_IOAS_UNMAP, &unmap);
+      error_report("%s IOMMU_IOAS_MAP iova=0x%"PRIx64" size=0x%lx (%d)",
+                   __func__, iova, size, ret);
+      *unmapped = unmap.size; 
+    } else {
+        struct vfio_iommu_type1_dma_unmap unmap = {
+            .argsz = sizeof(unmap),
+            .flags = 0,
+            .iova = iova,
+            .size = size,
+        };
+
+        ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap);
+        *unmapped = unmap.size;
+    } 
+    return ret;
+}
+
+static int __dma_map(VFIOContainer *container, hwaddr iova,
+                     ram_addr_t size, void *vaddr, bool readonly)
+{
+    int ret;
+
+    if (vfio_container_iommufd_based(container)) {
+        struct iommu_ioas_map map = {
+            .size = sizeof(struct iommu_ioas_map),
+            .flags = IOMMU_IOAS_MAP_FIXED_IOVA | IOMMU_IOAS_MAP_READABLE,
+            .ioas_id = container->ioas_id,
+            .user_va = (__u64)(uintptr_t)vaddr,
+            .length = size,
+            .iova = iova,
+        };
+
+        if (!readonly) {
+            map.flags |= IOMMU_IOAS_MAP_WRITEABLE;
+        }
+        ret = ioctl(container->space->iommufd, IOMMU_IOAS_MAP, &map);
+	error_report("%s IOMMU_IOAS_MAP iova=0x%"PRIx64" size=0x%lx vaddr=0x%"PRIxPTR" (%d)",
+                     __func__, iova, size, (uintptr_t)vaddr, ret);
+    } else {
+        struct vfio_iommu_type1_dma_map map = {
+           .argsz = sizeof(map),
+           .flags = VFIO_DMA_MAP_FLAG_READ,
+           .vaddr = (__u64)(uintptr_t)vaddr,
+           .iova = iova,
+           .size = size,
+        };
+
+        if (!readonly) {
+            map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+        }
+        ret = ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map);
+    }
+    return ret;
+}
+
 /*
  * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
  */
@@ -209,19 +281,14 @@ static int vfio_dma_unmap(VFIOContainer *container,
                           hwaddr iova, ram_addr_t size,
                           IOMMUTLBEntry *iotlb)
 {
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .flags = 0,
-        .iova = iova,
-        .size = size,
-    };
+    ram_addr_t unmapped;
 
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
 
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
+    while (__dma_unmap(container, iova, size, &unmapped)) {
         /*
          * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
          * v4.15) where an overflow in its wrap-around check prevents us from
@@ -234,10 +301,10 @@ static int vfio_dma_unmap(VFIOContainer *container,
          * is queued for kernel v5.0 so this workaround can be removed once
          * affected kernels are sufficiently deprecated.
          */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
+        if (errno == EINVAL && unmapped && !(iova + unmapped) &&
             container->iommu_type == VFIO_TYPE1v2_IOMMU) {
             trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
+            size -= 1ULL << ctz64(container->pgsizes);
             continue;
         }
         error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
@@ -267,9 +334,9 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
      * again.  This shouldn't be necessary, but we sometimes see it in
      * the VGA ROM space.
      */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
+    if (!__dma_map(container, iova, size, vaddr, readonly) ||
+        (errno == EBUSY && __dma_unmap(container, iova, size, NULL) == 0 &&
+         __dma_map(container, iova, size, vaddr, readonly))) {
         return 0;
     }
 
@@ -277,9 +344,8 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
     return -errno;
 }
 
-static void vfio_host_win_add(VFIOContainer *container,
-                              hwaddr min_iova, hwaddr max_iova,
-                              uint64_t iova_pgsizes)
+void vfio_host_win_add(VFIOContainer *container, hwaddr min_iova,
+                       hwaddr max_iova, uint64_t iova_pgsizes)
 {
     VFIOHostDMAWindow *hostwin;
 
@@ -1113,7 +1179,7 @@ static void vfio_listener_log_sync(MemoryListener *listener,
     }
 }
 
-static const MemoryListener vfio_memory_listener = {
+const MemoryListener vfio_memory_listener = {
     .name = "vfio",
     .region_add = vfio_listener_region_add,
     .region_del = vfio_listener_region_del,
@@ -1152,7 +1218,7 @@ void vfio_reset_handler(void *opaque)
     }
 }
 
-static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 {
     VFIOAddressSpace *space;
 
@@ -1167,6 +1233,8 @@ static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
     space->as = as;
     QLIST_INIT(&space->containers);
 
+    space->iommufd = iommufd_get();
+
     if (QLIST_EMPTY(&vfio_address_spaces)) {
         qemu_register_reset(vfio_reset_handler, NULL);
     }
@@ -1180,6 +1248,7 @@ static void vfio_put_address_space(VFIOAddressSpace *space)
 {
     if (QLIST_EMPTY(&space->containers)) {
         QLIST_REMOVE(space, list);
+	iommufd_put(space->iommufd);
         g_free(space);
         qemu_unregister_reset(vfio_reset_handler, NULL);
     }

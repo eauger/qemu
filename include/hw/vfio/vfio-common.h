@@ -34,6 +34,9 @@
 
 #define VFIO_MSG_PREFIX "vfio %s: "
 
+/* temporary hack, should be exported by the kernel */
+#define VFIO_IOMMUFD    4
+
 enum {
     VFIO_DEVICE_TYPE_PCI = 0,
     VFIO_DEVICE_TYPE_PLATFORM = 1,
@@ -81,6 +84,7 @@ struct VFIOGroup;
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
+    int ioas_id;
     MemoryListener listener;
     MemoryListener prereg_listener;
     unsigned iommu_type;
@@ -94,6 +98,7 @@ typedef struct VFIOContainer {
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
+    QLIST_HEAD(, VFIODevice) dev_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
     QLIST_ENTRY(VFIOContainer) next;
 } VFIOContainer;
@@ -131,6 +136,8 @@ typedef struct VFIODevice {
     char *sysfsdev;
     char *name;
     DeviceState *dev;
+    int devfd;
+    int devid;
     int fd;
     int type;
     bool reset_works;
@@ -145,6 +152,7 @@ typedef struct VFIODevice {
     VFIOMigration *migration;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
+    QLIST_ENTRY(VFIODevice) container_next;
 } VFIODevice;
 
 struct VFIODeviceOps {
@@ -214,6 +222,8 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_get_device(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp);
+int vfio_device_bind_iommufd(VFIODevice *dev, AddressSpace *as, Error **errp);
+int vfio_get_iommufd_device(VFIODevice *vbasedev, Error **errp);
 
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
@@ -251,6 +261,13 @@ void vfio_kvm_device_add_group(VFIOGroup *group);
 void vfio_kvm_device_del_group(VFIOGroup *group);
 struct vfio_info_cap_header *
 vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id);
+
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
+void vfio_host_win_add(VFIOContainer *container, hwaddr min_iova,
+                       hwaddr max_iova, uint64_t iova_pgsizes);
+extern const MemoryListener vfio_memory_listener;
+
+
 
 extern int vfio_kvm_device_fd;
 
