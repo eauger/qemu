@@ -18,6 +18,8 @@
  *  Copyright (C) 2008, IBM, Muli Ben-Yehuda (muli@il.ibm.com)
  */
 
+#define LEGACY 0
+
 #include "qemu/osdep.h"
 #include <linux/vfio.h>
 #include <sys/ioctl.h>
@@ -2803,8 +2805,10 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
+#if LEGACY
     VFIODevice *vbasedev_iter;
     VFIOGroup *group;
+#endif
     char *tmp, *subsys, group_path[PATH_MAX], *group_name;
     Error *err = NULL;
     ssize_t len;
@@ -2858,6 +2862,8 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     trace_vfio_realize(vdev->vbasedev.name, groupid);
 
+
+#if LEGACY
     group = vfio_get_group(groupid, pci_device_iommu_address_space(pdev), errp);
     if (!group) {
         goto error;
@@ -2870,6 +2876,11 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
             goto error;
         }
     }
+#else
+    vfio_device_bind_iommufd(&vdev->vbasedev,
+                             pci_device_iommu_address_space(pdev), errp);
+
+#endif
 
     /*
      * Mediated devices *might* operate compatibly with discarding of RAM, but
@@ -2888,15 +2899,22 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     if (vdev->vbasedev.ram_block_discard_allowed && !is_mdev) {
         error_setg(errp, "x-balloon-allowed only potentially compatible "
                    "with mdev devices");
+#if LEGACY
         vfio_put_group(group);
+#endif
+
         goto error;
     }
 
+#if LEGACY
     ret = vfio_get_device(group, vdev->vbasedev.name, &vdev->vbasedev, errp);
     if (ret) {
         vfio_put_group(group);
         goto error;
     }
+#else
+    ret = vfio_get_iommufd_device(&vdev->vbasedev, errp);
+#endif
 
     vfio_populate_device(vdev, &err);
     if (err) {
@@ -3100,12 +3118,14 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
+#if LEGACY
     if (!pdev->failover_pair_id) {
         ret = vfio_migration_probe(&vdev->vbasedev, errp);
         if (ret) {
             error_report("%s: Migration disabled", vdev->vbasedev.name);
         }
     }
+#endif
 
     vfio_register_err_notifier(vdev);
     vfio_register_req_notifier(vdev);
