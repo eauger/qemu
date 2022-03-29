@@ -243,5 +243,13 @@ int vfio_spapr_remove_window(VFIOContainer *container,
 
 int vfio_migration_probe(VFIODevice *vbasedev, Error **errp);
 void vfio_migration_finalize(VFIODevice *vbasedev);
+bool vfio_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
+                        ram_addr_t *ram_addr, bool *read_only);
+void vfio_kvm_device_add_group(VFIOGroup *group);
+void vfio_kvm_device_del_group(VFIOGroup *group);
+struct vfio_info_cap_header *
+vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id);
+
+extern int vfio_kvm_device_fd;
 
 #endif /* HW_VFIO_VFIO_COMMON_H */
