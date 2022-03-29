@@ -33,6 +33,8 @@
 
 #define VFIO_MSG_PREFIX "vfio %s: "
 
+extern const MemoryListener vfio_memory_listener;
+
 enum {
     VFIO_DEVICE_TYPE_PCI = 0,
     VFIO_DEVICE_TYPE_PLATFORM = 1,
@@ -189,6 +191,16 @@ typedef struct VFIODisplay {
         VFIODMABuf *cursor;
     } dmabuf;
 } VFIODisplay;
+
+void vfio_host_win_add(VFIOContainer *container,
+                       hwaddr min_iova, hwaddr max_iova,
+                       uint64_t iova_pgsizes);
+void vfio_listener_release(VFIOContainer *container);
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
+void vfio_put_address_space(VFIOAddressSpace *space);
+void vfio_spapr_group_attach(VFIOContainer *container, int tablefd);
+bool vfio_devices_all_running_and_saving(VFIOContainer *container);
+bool vfio_devices_all_dirty_tracking(VFIOContainer *container);
 
 void vfio_put_base_device(VFIODevice *vbasedev);
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
