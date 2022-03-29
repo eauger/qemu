@@ -2719,6 +2719,7 @@ if have_system
     'hw/tpm',
     'hw/usb',
     'hw/vfio',
+    'hw/iommufd',
     'hw/virtio',
     'hw/watchdog',
     'hw/xen',
