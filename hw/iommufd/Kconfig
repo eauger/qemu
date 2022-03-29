@@ -1,0 +1,4 @@
+config IOMMUFD
+    bool
+    default n
+    depends on LINUX
