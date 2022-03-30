@@ -26,6 +26,7 @@
 #include "qemu/notify.h"
 #include "ui/console.h"
 #include "hw/display/ramfb.h"
+#include "hw/iommufd/iommufd.h"
 #ifdef CONFIG_LINUX
 #include <linux/vfio.h>
 #endif
@@ -70,6 +71,7 @@ typedef struct VFIOMigration {
 
 typedef struct VFIOAddressSpace {
     AddressSpace *as;
+    int iommufd;
     QLIST_HEAD(, VFIOContainer) containers;
     QLIST_ENTRY(VFIOAddressSpace) list;
 } VFIOAddressSpace;
@@ -251,5 +253,15 @@ struct vfio_info_cap_header *
 vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id);
 
 extern int vfio_kvm_device_fd;
+
+static inline bool
+vfio_container_iommufd_based(VFIOContainer *container)
+{
+    if (container->space->iommufd >= 0 && container->iommu_type > VFIO_TYPE1v2_IOMMU) {
+        return true;
+    } else {
+        return false;
+    }
+}
 
 #endif /* HW_VFIO_VFIO_COMMON_H */
