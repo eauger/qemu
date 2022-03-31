@@ -874,3 +874,49 @@ void vfio_put_address_space(VFIOAddressSpace *space)
         g_free(space);
     }
 }
+
+#define MAX_IOMMU_OPS 2
+
+static const VFIOIOMMUOps *iommu_ops[MAX_IOMMU_OPS] = {};
+
+static int iommu_ops_count;
+
+void vfio_register_iommu_ops(const VFIOIOMMUOps *ops)
+{
+    assert(iommu_ops_count < MAX_IOMMU_OPS);
+    assert(ops->vfio_iommu_attach_device && ops->vfio_iommu_detach_device);
+    iommu_ops[iommu_ops_count++] = ops;
+}
+
+static const VFIOIOMMUOps *vfio_iommu_ops(VFIOIOMMUBackendType backend_type)
+{
+    int i;
+
+    for (i = 0; i < MAX_IOMMU_OPS; i++) {
+        if (iommu_ops[i] && iommu_ops[i]->backend_type ==  backend_type) {
+            return iommu_ops[i];
+        }
+    }
+    return NULL;
+}
+
+int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
+{
+    int ret;
+
+    vbasedev->iommu_ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+    ret = vbasedev->iommu_ops->vfio_iommu_attach_device(vbasedev, as, errp);
+    if (ret) {
+        vbasedev->iommu_ops = NULL;
+    }
+    return ret;
+}
+
+void vfio_put_device(VFIODevice *vbasedev)
+{
+    if (!vbasedev->iommu_ops) {
+        return;
+    }
+    vbasedev->iommu_ops->vfio_iommu_detach_device(vbasedev);
+    vbasedev->iommu_ops = NULL;
+}
