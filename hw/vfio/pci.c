@@ -42,6 +42,8 @@
 #include "qapi/error.h"
 #include "migration/blocker.h"
 #include "migration/qemu-file.h"
+#include "qapi/visitor.h"
+#include "qapi/qapi-visit-common.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
@@ -2830,8 +2832,12 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     vbasedev->name = g_path_get_basename(vbasedev->sysfsdev);
     vbasedev->ops = &vfio_pci_ops;
-    vbasedev->iommu_ops = &legacy_ops;
-    //vbasedev->iommu_ops = &iommufd_ops;
+
+    if (vbasedev->iommufd_be == ON_OFF_AUTO_ON) {
+        vbasedev->iommu_ops = &iommufd_ops;
+    } else {
+        vbasedev->iommu_ops = &legacy_ops;
+    }
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
 
@@ -3236,6 +3242,26 @@ static Property vfio_pci_dev_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
+static void get_iommu_be(Object *obj, Visitor *v, const char *name,
+                         void *opaque, Error **errp)
+{
+    VFIOPCIDevice *vdev = VFIO_PCI(obj);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    OnOffAuto iommufd_be = vbasedev->iommufd_be;
+
+    visit_type_OnOffAuto(v, name, &iommufd_be, errp);
+}
+
+static void set_iommu_be(Object *obj, Visitor *v, const char *name,
+                         void *opaque, Error **errp)
+{
+    VFIOPCIDevice *vdev = VFIO_PCI(obj);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+
+    visit_type_OnOffAuto(v, name, &vbasedev->iommufd_be, errp);
+}
+
+
 static void vfio_pci_dev_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -3243,6 +3269,8 @@ static void vfio_pci_dev_class_init(ObjectClass *klass, void *data)
 
     dc->reset = vfio_pci_reset;
     device_class_set_props(dc, vfio_pci_dev_properties);
+    object_class_property_add(klass, "iommufd", "OnOffAuto",
+                              get_iommu_be, set_iommu_be, NULL, NULL);
     dc->desc = "VFIO-based PCI device assignment";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     pdc->realize = vfio_realize;
