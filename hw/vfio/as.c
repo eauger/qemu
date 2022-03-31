@@ -900,10 +900,45 @@ const VFIOIOMMUOps *vfio_iommu_ops(VFIOIOMMUBackendType backend_type)
     return NULL;
 }
 
+static const struct VFIOIOMMUOps *
+select_iommu_backend(OnOffAuto value, Error **errp)
+{
+    const struct VFIOIOMMUOps *ops = NULL;
+
+    if (value == ON_OFF_AUTO_OFF) {
+        ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+    } else {
+        int iommufd = qemu_open_old("/dev/iommu", O_RDWR);
+
+        ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_IOMMUFD);
+        if (iommufd < 0 || !ops) {
+            if (value == ON_OFF_AUTO_AUTO) {
+                ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+            } else { /* ON */
+                error_setg(errp, "iommufd backend is not supported by %s",
+                           iommufd < 0 ? "the host" : "QEMU");
+                error_append_hint(errp, "set iommufd=off\n");
+                ops = NULL;
+            }
+        }
+        close(iommufd);
+    }
+    return ops;
+}
+
 int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
 {
-    vbasedev->iommu_ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
-    return ops->vfio_iommu_attach_device(vbasedev, as, errp);
+    vbasedev->iommu_ops = select_iommu_backend(vbasedev->iommufd_be, errp);
+
+    if (!vbasedev->iommu_ops) {
+        return -ENOENT;
+    }
+
+    if (!vbasedev->iommu_ops->vfio_iommu_attach_device) {
+        error_setg(errp, "IOMMU backend misses attach ops!");
+    }
+
+    return vbasedev->iommu_ops->vfio_iommu_attach_device(vbasedev, as, errp);
 }
 
 void vfio_put_device(VFIODevice *vbasedev)
