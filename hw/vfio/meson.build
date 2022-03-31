@@ -3,6 +3,7 @@ vfio_ss.add(files(
   'common.c',
   'container.c',
   'as.c',
+  'iommufd.c',
   'spapr.c',
   'migration.c',
 ))
