@@ -123,6 +123,7 @@ typedef struct VFIODevice {
     VFIOMigration *migration;
     Error *migration_blocker;
     OnOffAuto pre_copy_dirty_page_tracking;
+    OnOffAuto iommufd_be;
 } VFIODevice;
 
 struct VFIODeviceOps {

@@ -879,8 +879,17 @@ static const VFIOIOMMUOps *iommu_ops[] = {
 
 int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
 {
-    const VFIOIOMMUOps *ops;
-    int index = 0;
+    const VFIOIOMMUOps *ops = vbasedev->iommu_ops;
+    int ret, index = 0;
+
+    if (ops->vfio_iommu_attach_device) {
+        ret = ops->vfio_iommu_attach_device(vbasedev, as, errp);
+        if (ret) {
+            error_report("User configed BE type doesn't support %s",
+                        ops->backend_type ? "VFIO_IOMMU_BACKEND_TYPE_IOMMUFD" : "VFIO_IOMMU_BACKEND_TYPE_LEGACY");
+        }
+        return ret;
+    }
 
     ops = iommu_ops[index];
     while (ops) {
