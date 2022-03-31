@@ -97,6 +97,7 @@ typedef struct VFIODevice {
     bool ram_block_discard_allowed;
     bool enable_migration;
     VFIODeviceOps *ops;
+    const struct VFIOIOMMUOps *iommu_ops;
     unsigned int num_irqs;
     unsigned int num_regions;
     unsigned int flags;
@@ -113,6 +114,23 @@ struct VFIODeviceOps {
     void (*vfio_save_config)(VFIODevice *vdev, QEMUFile *f);
     int (*vfio_load_config)(VFIODevice *vdev, QEMUFile *f);
 };
+
+typedef int (*vfio_iommu_attach_device)(VFIODevice *vbasedev,
+                                        AddressSpace *as, Error **errp);
+typedef void (*vfio_iommu_put_device)(VFIODevice *vbasedev);
+
+typedef enum VFIOIOMMUBackendType {
+    VFIO_IOMMU_BACKEND_TYPE_LEGACY = 0,
+    VFIO_IOMMU_BACKEND_TYPE_IOMMUFD = 1,
+} VFIOIOMMUBackendType;
+
+typedef struct VFIOIOMMUOps {
+    VFIOIOMMUBackendType backend_type;
+    vfio_iommu_attach_device  vfio_iommu_attach_device;
+    vfio_iommu_put_device  vfio_iommu_put_device;
+} VFIOIOMMUOps;
+
+extern const VFIOIOMMUOps legacy_ops;
 
 typedef struct VFIOGroup {
     int fd;
@@ -176,10 +194,6 @@ void vfio_region_unmap(VFIORegion *region);
 void vfio_region_exit(VFIORegion *region);
 void vfio_region_finalize(VFIORegion *region);
 void vfio_reset_handler(void *opaque);
-VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
-void vfio_put_group(VFIOGroup *group);
-int vfio_get_device(VFIOGroup *group, const char *name,
-                    VFIODevice *vbasedev, Error **errp);
 
 extern const MemoryRegionOps vfio_region_ops;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
