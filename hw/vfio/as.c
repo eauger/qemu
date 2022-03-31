@@ -1010,6 +1010,9 @@ vfio_get_container_class(VFIOIOMMUBackendType be)
     case VFIO_IOMMU_BACKEND_TYPE_LEGACY:
         klass = object_class_by_name(TYPE_VFIO_LEGACY_CONTAINER);
         return VFIO_CONTAINER_OBJ_CLASS(klass);
+    case VFIO_IOMMU_BACKEND_TYPE_IOMMUFD:
+        klass = object_class_by_name(TYPE_VFIO_IOMMUFD_CONTAINER);
+        return VFIO_CONTAINER_OBJ_CLASS(klass);
     default:
         return NULL;
     }
@@ -1019,9 +1022,10 @@ int vfio_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
 {
     VFIOContainerClass *vccs;
 
-    vccs = vfio_get_container_class(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
-    if (!vccs) {
-        return -ENOENT;
+    if (vbasedev->iommufd) {
+        vccs = vfio_get_container_class(VFIO_IOMMU_BACKEND_TYPE_IOMMUFD);
+    } else {
+        vccs = vfio_get_container_class(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
     }
     return vccs->attach_device(vbasedev, as, errp);
 }
