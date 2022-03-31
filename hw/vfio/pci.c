@@ -42,6 +42,8 @@
 #include "qapi/error.h"
 #include "migration/blocker.h"
 #include "migration/qemu-file.h"
+#include "qapi/visitor.h"
+#include "qapi/qapi-visit-common.h"
 
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
@@ -2800,6 +2802,32 @@ static void vfio_unregister_req_notifier(VFIOPCIDevice *vdev)
     vdev->req_enabled = false;
 }
 
+static const struct VFIOIOMMUOps *
+select_iommu_backend(OnOffAuto value, Error **errp)
+{
+    const struct VFIOIOMMUOps *ops = NULL;
+
+    if (value == ON_OFF_AUTO_OFF) {
+        ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+    } else {
+        int iommufd = qemu_open_old("/dev/iommu", O_RDWR);
+
+        ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_IOMMUFD);
+        if (iommufd < 0 || !ops) {
+            if (value == ON_OFF_AUTO_AUTO) {
+                ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+            } else { /* ON */
+                error_setg(errp, "iommufd backend is not supported by %s",
+                           iommufd < 0 ? "the host" : "QEMU");
+                error_append_hint(errp, "set iommufd=off\n");
+                ops = NULL;
+            }
+        }
+        close(iommufd);
+    }
+    return ops;
+}
+
 static void vfio_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOPCIDevice *vdev = VFIO_PCI(pdev);
@@ -2832,9 +2860,13 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     vbasedev->name = g_path_get_basename(vbasedev->sysfsdev);
     vbasedev->ops = &vfio_pci_ops;
-    vbasedev->iommu_ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
+
+    vbasedev->iommu_ops = select_iommu_backend(vbasedev->iommufd_be, errp);
+    if (!vbasedev->iommu_ops) {
+        goto error;
+    }
 
     /*
      * Mediated devices *might* operate compatibly with discarding of RAM, but
@@ -3234,6 +3266,26 @@ static Property vfio_pci_dev_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
+static void get_iommu_be(Object *obj, Visitor *v, const char *name,
+                         void *opaque, Error **errp)
+{
+    VFIOPCIDevice *vdev = VFIO_PCI(obj);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    OnOffAuto iommufd_be = vbasedev->iommufd_be;
+
+    visit_type_OnOffAuto(v, name, &iommufd_be, errp);
+}
+
+static void set_iommu_be(Object *obj, Visitor *v, const char *name,
+                         void *opaque, Error **errp)
+{
+    VFIOPCIDevice *vdev = VFIO_PCI(obj);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+
+    visit_type_OnOffAuto(v, name, &vbasedev->iommufd_be, errp);
+}
+
+
 static void vfio_pci_dev_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -3241,6 +3293,10 @@ static void vfio_pci_dev_class_init(ObjectClass *klass, void *data)
 
     dc->reset = vfio_pci_reset;
     device_class_set_props(dc, vfio_pci_dev_properties);
+    object_class_property_add(klass, "iommufd", "OnOffAuto",
+                              get_iommu_be, set_iommu_be, NULL, NULL);
+    object_class_property_set_description(klass, "iommufd",
+                                          "Enable iommufd backend");
     dc->desc = "VFIO-based PCI device assignment";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     pdc->realize = vfio_realize;

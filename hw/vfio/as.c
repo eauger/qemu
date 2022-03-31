@@ -902,8 +902,19 @@ const VFIOIOMMUOps *vfio_iommu_ops(VFIOIOMMUBackendType backend_type)
 
 int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
 {
+    const VFIOIOMMUOps *ops = vbasedev->iommu_ops;
     int ret = -ENOENT;
     int index = 0;
+
+    if (ops && ops->vfio_iommu_attach_device) {
+        /* The backend was attached with an 'iommufd' device option */
+        ret = ops->vfio_iommu_attach_device(vbasedev, as, errp);
+        if (ret) {
+            error_setg(errp, "User configured IOMMU backend %s couldn't attach the device",
+                        ops->backend_type ? "VFIO_IOMMU_BACKEND_TYPE_IOMMUFD" : "VFIO_IOMMU_BACKEND_TYPE_LEGACY");
+        }
+        return ret;
+    }
 
     for (index = 0; index < MAX_IOMMU_OPS; index++) {
         const VFIOIOMMUOps *ops = iommu_ops[index];
