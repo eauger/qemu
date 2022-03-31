@@ -38,6 +38,8 @@
 #include "trace.h"
 #include "qapi/error.h"
 #include "migration/migration.h"
+#include "exec/ram_addr.h"
+#include "hw/pci/pci.h"
 
 #ifdef CONFIG_KVM
 /*
@@ -932,7 +934,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
     }
 }
 
-VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
+static VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
 {
     VFIOGroup *group;
     VFIOContainer *bcontainer;
@@ -1001,7 +1003,7 @@ free_group_exit:
     return NULL;
 }
 
-void vfio_put_group(VFIOGroup *group)
+static void vfio_put_group(VFIOGroup *group)
 {
     if (!group || !QLIST_EMPTY(&group->device_list)) {
         return;
@@ -1022,7 +1024,7 @@ void vfio_put_group(VFIOGroup *group)
     }
 }
 
-int vfio_get_device(VFIOGroup *group, const char *name,
+static int vfio_get_device(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
@@ -1079,17 +1081,6 @@ int vfio_get_device(VFIOGroup *group, const char *name,
 
     vbasedev->reset_works = !!(dev_info.flags & VFIO_DEVICE_FLAGS_RESET);
     return 0;
-}
-
-void vfio_put_base_device(VFIODevice *vbasedev)
-{
-    if (!vbasedev->group) {
-        return;
-    }
-    QLIST_REMOVE(vbasedev, next);
-    vbasedev->group = NULL;
-    trace_vfio_put_base_device(vbasedev->fd);
-    close(vbasedev->fd);
 }
 
 /* FIXME: should below code be in common.c? */
@@ -1190,6 +1181,81 @@ int vfio_eeh_as_op(AddressSpace *as, uint32_t op)
     return vfio_eeh_container_op(container, op);
 }
 
+static int vfio_device_groupid(VFIODevice *vbasedev, Error **errp)
+{
+    char *tmp, group_path[PATH_MAX], *group_name;
+    int ret, groupid;
+    ssize_t len;
+
+    tmp = g_strdup_printf("%s/iommu_group", vbasedev->sysfsdev);
+    len = readlink(tmp, group_path, sizeof(group_path));
+    g_free(tmp);
+
+    if (len <= 0 || len >= sizeof(group_path)) {
+        ret = len < 0 ? -errno : -ENAMETOOLONG;
+        error_setg_errno(errp, -ret, "no iommu_group found");
+        return ret;
+    }
+
+    group_path[len] = 0;
+
+    group_name = basename(group_path);
+    if (sscanf(group_name, "%d", &groupid) != 1) {
+        error_setg_errno(errp, errno, "failed to read %s", group_path);
+        return -errno;
+    }
+    return groupid;
+}
+
+static int
+legacy_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
+{
+    int groupid = vfio_device_groupid(vbasedev, errp);
+    VFIODevice *vbasedev_iter;
+    VFIOGroup *group;
+    int ret;
+
+    if (groupid < 0) {
+        return groupid;
+    }
+
+    trace_vfio_realize(vbasedev->name, groupid);
+    group = vfio_get_group(groupid, as, errp);
+    if (!group) {
+        return -1;
+    }
+
+    QLIST_FOREACH(vbasedev_iter, &group->device_list, next) {
+        if (strcmp(vbasedev_iter->name, vbasedev->name) == 0) {
+            error_setg(errp, "device is already attached");
+            vfio_put_group(group);
+            return -1;
+        }
+    }
+    ret = vfio_get_device(group, vbasedev->name, vbasedev, errp);
+    if (ret) {
+        vfio_put_group(group);
+        return -1;
+    }
+    return 0;
+}
+
+static void legacy_put_device(VFIODevice *vbasedev)
+{
+    vfio_put_group(vbasedev->group);
+    QLIST_REMOVE(vbasedev, next);
+    vbasedev->group = NULL;
+    trace_vfio_put_base_device(vbasedev->fd);
+    close(vbasedev->fd);
+    g_free(vbasedev->name);
+}
+
+const VFIOIOMMUOps legacy_ops = {
+    .backend_type = VFIO_IOMMU_BACKEND_TYPE_LEGACY,
+    .vfio_iommu_attach_device = legacy_attach_device,
+    .vfio_iommu_put_device = legacy_put_device,
+};
+
 static void vfio_legacy_container_class_init(ObjectClass *klass,
                                              void *data)
 {
@@ -1213,6 +1279,7 @@ static const TypeInfo vfio_legacy_container_info = {
 static void vfio_register_types(void)
 {
     type_register_static(&vfio_legacy_container_info);
+    vfio_register_iommu_ops(&legacy_ops);
 }
 
 type_init(vfio_register_types)
