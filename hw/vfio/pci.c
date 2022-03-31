@@ -2831,8 +2831,8 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
 
     vbasedev->name = g_path_get_basename(vbasedev->sysfsdev);
     vbasedev->ops = &vfio_pci_ops;
-    vbasedev->iommu_ops = &legacy_ops;
-    //vbasedev->iommu_ops = &iommufd_ops;
+    //vbasedev->iommu_ops = &legacy_ops;
+    vbasedev->iommu_ops = &iommufd_ops;
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
 
