@@ -41,7 +41,7 @@
 #include "qapi/error.h"
 #include "migration/migration.h"
 
-static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
+VFIOAddressSpaceList vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
 
 #if 0
