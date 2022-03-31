@@ -44,135 +44,6 @@
 static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
 
-static int vfio_dma_unmap_bitmap(VFIOContainer *container,
-                                 hwaddr iova, ram_addr_t size,
-                                 IOMMUTLBEntry *iotlb)
-{
-    struct vfio_iommu_type1_dma_unmap *unmap;
-    struct vfio_bitmap *bitmap;
-    uint64_t pages = REAL_HOST_PAGE_ALIGN(size) / qemu_real_host_page_size;
-    int ret;
-
-    unmap = g_malloc0(sizeof(*unmap) + sizeof(*bitmap));
-
-    unmap->argsz = sizeof(*unmap) + sizeof(*bitmap);
-    unmap->iova = iova;
-    unmap->size = size;
-    unmap->flags |= VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP;
-    bitmap = (struct vfio_bitmap *)&unmap->data;
-
-    /*
-     * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
-     * qemu_real_host_page_size to mark those dirty. Hence set bitmap_pgsize
-     * to qemu_real_host_page_size.
-     */
-
-    bitmap->pgsize = qemu_real_host_page_size;
-    bitmap->size = ROUND_UP(pages, sizeof(__u64) * BITS_PER_BYTE) /
-                   BITS_PER_BYTE;
-
-    if (bitmap->size > container->max_dirty_bitmap_size) {
-        error_report("UNMAP: Size of bitmap too big 0x%"PRIx64,
-                     (uint64_t)bitmap->size);
-        ret = -E2BIG;
-        goto unmap_exit;
-    }
-
-    bitmap->data = g_try_malloc0(bitmap->size);
-    if (!bitmap->data) {
-        ret = -ENOMEM;
-        goto unmap_exit;
-    }
-
-    ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
-    if (!ret) {
-        cpu_physical_memory_set_dirty_lebitmap((unsigned long *)bitmap->data,
-                iotlb->translated_addr, pages);
-    } else {
-        error_report("VFIO_UNMAP_DMA with DIRTY_BITMAP : %m");
-    }
-
-    g_free(bitmap->data);
-unmap_exit:
-    g_free(unmap);
-    return ret;
-}
-
-/*
- * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
- */
-static int vfio_dma_unmap(VFIOContainer *container,
-                          hwaddr iova, ram_addr_t size,
-                          IOMMUTLBEntry *iotlb)
-{
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .flags = 0,
-        .iova = iova,
-        .size = size,
-    };
-
-    if (iotlb && container->dirty_pages_supported &&
-        vfio_devices_all_running_and_saving(container)) {
-        return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
-    }
-
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
-        /*
-         * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
-         * v4.15) where an overflow in its wrap-around check prevents us from
-         * unmapping the last page of the address space.  Test for the error
-         * condition and re-try the unmap excluding the last page.  The
-         * expectation is that we've never mapped the last page anyway and this
-         * unmap request comes via vIOMMU support which also makes it unlikely
-         * that this page is used.  This bug was introduced well after type1 v2
-         * support was introduced, so we shouldn't need to test for v1.  A fix
-         * is queued for kernel v5.0 so this workaround can be removed once
-         * affected kernels are sufficiently deprecated.
-         */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
-            container->iommu_type == VFIO_TYPE1v2_IOMMU) {
-            trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
-            continue;
-        }
-        error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
-        return -errno;
-    }
-
-    return 0;
-}
-
-static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
-                        ram_addr_t size, void *vaddr, bool readonly)
-{
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = VFIO_DMA_MAP_FLAG_READ,
-        .vaddr = (__u64)(uintptr_t)vaddr,
-        .iova = iova,
-        .size = size,
-    };
-
-    if (!readonly) {
-        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
-    }
-
-    /*
-     * Try the mapping, if it fails with EBUSY, unmap the region and try
-     * again.  This shouldn't be necessary, but we sometimes see it in
-     * the VGA ROM space.
-     */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
-        return 0;
-    }
-
-    error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
-    return -errno;
-}
-
 void vfio_host_win_add(VFIOContainer *container,
                        hwaddr min_iova, hwaddr max_iova,
                        uint64_t iova_pgsizes)
@@ -316,6 +187,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
     VFIOContainer *container = giommu->container;
+    const struct VFIOIOMMUOps *iommu_ops = container->iommu_ops;
     hwaddr iova = iotlb->iova + giommu->iommu_offset;
     void *vaddr;
     int ret;
@@ -344,9 +216,9 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
          * of vaddr will always be there, even if the memory object is
          * destroyed and its backing memory munmap-ed.
          */
-        ret = vfio_dma_map(container, iova,
-                           iotlb->addr_mask + 1, vaddr,
-                           read_only);
+        ret = iommu_ops->vfio_iommu_dma_map(container, iova,
+                                            iotlb->addr_mask + 1, vaddr,
+                                            read_only);
         if (ret) {
             error_report("vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx", %p) = %d (%m)",
@@ -354,7 +226,8 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
                          iotlb->addr_mask + 1, vaddr, ret);
         }
     } else {
-        ret = vfio_dma_unmap(container, iova, iotlb->addr_mask + 1, iotlb);
+        ret = iommu_ops->vfio_iommu_dma_unmap(container, iova,
+                                              iotlb->addr_mask + 1, iotlb);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
@@ -371,12 +244,14 @@ static void vfio_ram_discard_notify_discard(RamDiscardListener *rdl,
 {
     VFIORamDiscardListener *vrdl = container_of(rdl, VFIORamDiscardListener,
                                                 listener);
+    VFIOContainer *container = vrdl->container;
+    const struct VFIOIOMMUOps *iommu_ops = container->iommu_ops;
     const hwaddr size = int128_get64(section->size);
     const hwaddr iova = section->offset_within_address_space;
     int ret;
 
     /* Unmap with a single call. */
-    ret = vfio_dma_unmap(vrdl->container, iova, size , NULL);
+    ret = iommu_ops->vfio_iommu_dma_unmap(container, iova, size , NULL);
     if (ret) {
         error_report("%s: vfio_dma_unmap() failed: %s", __func__,
                      strerror(-ret));
@@ -388,6 +263,8 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
 {
     VFIORamDiscardListener *vrdl = container_of(rdl, VFIORamDiscardListener,
                                                 listener);
+    VFIOContainer *container = vrdl->container;
+    const struct VFIOIOMMUOps *iommu_ops = container->iommu_ops;
     const hwaddr end = section->offset_within_region +
                        int128_get64(section->size);
     hwaddr start, next, iova;
@@ -406,8 +283,8 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
                section->offset_within_address_space;
         vaddr = memory_region_get_ram_ptr(section->mr) + start;
 
-        ret = vfio_dma_map(vrdl->container, iova, next - start,
-                           vaddr, section->readonly);
+        ret = iommu_ops->vfio_iommu_dma_map(container, iova, next - start,
+                                            vaddr, section->readonly);
         if (ret) {
             /* Rollback */
             vfio_ram_discard_notify_discard(rdl, section);
@@ -518,6 +395,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    const struct VFIOIOMMUOps *iommu_ops = container->iommu_ops;
     hwaddr iova, end;
     Int128 llend, llsize;
     void *vaddr;
@@ -697,8 +575,8 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
-    ret = vfio_dma_map(container, iova, int128_get64(llsize),
-                       vaddr, section->readonly);
+    ret = iommu_ops->vfio_iommu_dma_map(container, iova, int128_get64(llsize),
+                                        vaddr, section->readonly);
     if (ret) {
         error_setg(&err, "vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
                    "0x%"HWADDR_PRIx", %p) = %d (%m)",
@@ -741,6 +619,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    const struct VFIOIOMMUOps *iommu_ops = container->iommu_ops;
     hwaddr iova, end;
     Int128 llend, llsize;
     int ret;
@@ -823,7 +702,8 @@ static void vfio_listener_region_del(MemoryListener *listener,
         if (int128_eq(llsize, int128_2_64())) {
             /* The unmap ioctl doesn't accept a full 64-bit span. */
             llsize = int128_rshift(llsize, 1);
-            ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
+            ret = iommu_ops->vfio_iommu_dma_unmap(container, iova,
+                                                  int128_get64(llsize), NULL);
             if (ret) {
                 error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                              "0x%"HWADDR_PRIx") = %d (%m)",
@@ -831,7 +711,8 @@ static void vfio_listener_region_del(MemoryListener *listener,
             }
             iova += int128_get64(llsize);
         }
-        ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
+        ret = iommu_ops->vfio_iommu_dma_unmap(container, iova,
+                                              int128_get64(llsize), NULL);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
