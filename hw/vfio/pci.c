@@ -3095,12 +3095,14 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
+#if 0
     if (!pdev->failover_pair_id) {
         ret = vfio_migration_probe(vbasedev, errp);
         if (ret) {
             error_report("%s: Migration disabled", vbasedev->name);
         }
     }
+#endif
 
     vfio_register_err_notifier(vdev);
     vfio_register_req_notifier(vdev);
