@@ -2831,6 +2831,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     vbasedev->name = g_path_get_basename(vbasedev->sysfsdev);
     vbasedev->ops = &vfio_pci_ops;
     vbasedev->iommu_ops = &legacy_ops;
+    //vbasedev->iommu_ops = &iommufd_ops;
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
 
@@ -3062,12 +3063,14 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
+#if 0
     if (!pdev->failover_pair_id) {
         ret = vfio_migration_probe(vbasedev, errp);
         if (ret) {
             error_report("%s: Migration disabled", vbasedev->name);
         }
     }
+#endif
 
     vfio_register_err_notifier(vdev);
     vfio_register_req_notifier(vdev);
