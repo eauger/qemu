@@ -860,7 +860,7 @@ int vfio_migration_probe(VFIODevice *vbasedev, Error **errp)
     struct vfio_region_info *info = NULL;
     int ret = -ENOTSUP;
 
-    if (!vbasedev->enable_migration || !container->dirty_pages_supported) {
+    if (!vbasedev->enable_migration || !container->obj.dirty_pages_supported) {
         goto add_blocker;
     }
 
