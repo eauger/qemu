@@ -1024,7 +1024,7 @@ static void vfio_put_group(VFIOGroup *group)
     }
 }
 
-static int vfio_get_device(VFIOGroup *group, const char *name,
+static int vfio_get_device_from_group(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp)
 {
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
@@ -1076,7 +1076,7 @@ static int vfio_get_device(VFIOGroup *group, const char *name,
     vbasedev->num_regions = dev_info.num_regions;
     vbasedev->flags = dev_info.flags;
 
-    trace_vfio_get_device(name, dev_info.flags, dev_info.num_regions,
+    trace_vfio_get_device_from_group(name, dev_info.flags, dev_info.num_regions,
                           dev_info.num_irqs);
 
     vbasedev->reset_works = !!(dev_info.flags & VFIO_DEVICE_FLAGS_RESET);
@@ -1232,7 +1232,7 @@ legacy_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
             return -1;
         }
     }
-    ret = vfio_get_device(group, vbasedev->name, vbasedev, errp);
+    ret = vfio_get_device_from_group(group, vbasedev->name, vbasedev, errp);
     if (ret) {
         vfio_put_group(group);
         return -1;

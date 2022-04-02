@@ -130,6 +130,9 @@ typedef struct VFIOIOMMUOps {
     vfio_iommu_put_device  vfio_iommu_put_device;
 } VFIOIOMMUOps;
 
+int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp);
+void vfio_put_device(VFIODevice *vbasedev);
+
 typedef struct VFIOGroup {
     int fd;
     int groupid;
