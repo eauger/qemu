@@ -130,8 +130,6 @@ typedef struct VFIOIOMMUOps {
     vfio_iommu_put_device  vfio_iommu_put_device;
 } VFIOIOMMUOps;
 
-extern const VFIOIOMMUOps legacy_ops;
-
 int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp);
 void vfio_put_device(VFIODevice *vbasedev);
 
