@@ -898,3 +898,27 @@ const VFIOIOMMUOps *vfio_iommu_ops(VFIOIOMMUBackendType backend_type)
     return NULL;
 }
 
+int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
+{
+    const VFIOIOMMUOps *ops;
+    int index = 0;
+
+    ops = iommu_ops[index];
+    while (ops) {
+        if (ops->vfio_iommu_attach_device &&
+            !ops->vfio_iommu_attach_device(vbasedev, as, errp)) {
+            vbasedev->iommu_ops = ops;
+            return 0;
+        }
+	ops = iommu_ops[++index];
+    }
+    return -1;
+}
+
+void vfio_put_device(VFIODevice *vbasedev)
+{
+   if (vbasedev->iommu_ops && vbasedev->iommu_ops->vfio_iommu_put_device) {
+       vbasedev->iommu_ops->vfio_iommu_put_device(vbasedev);
+       vbasedev->iommu_ops = NULL;
+   }
+}

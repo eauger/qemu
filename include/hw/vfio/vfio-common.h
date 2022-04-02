@@ -132,6 +132,9 @@ typedef struct VFIOIOMMUOps {
 
 extern const VFIOIOMMUOps legacy_ops;
 
+int vfio_get_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp);
+void vfio_put_device(VFIODevice *vbasedev);
+
 typedef struct VFIOGroup {
     int fd;
     int groupid;

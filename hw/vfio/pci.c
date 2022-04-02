@@ -2652,12 +2652,12 @@ static void vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
     }
 }
 
-static void vfio_put_device(VFIOPCIDevice *vdev)
+static void vfio_put_pci_device(VFIOPCIDevice *vdev)
 {
     VFIODevice *vbasedev = &vdev->vbasedev;
     g_free(vdev->msix);
 
-    vbasedev->iommu_ops->vfio_iommu_put_device(vbasedev);
+    vfio_put_device(vbasedev);
 }
 
 static void vfio_err_notifier_handler(void *opaque)
@@ -2856,8 +2856,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
         goto error;
     }
 
-    ret = vbasedev->iommu_ops->vfio_iommu_attach_device(vbasedev,
-        pci_device_iommu_address_space(pdev), errp);
+    ret = vfio_get_device(vbasedev, pci_device_iommu_address_space(pdev), errp);
     if (ret) {
         return;
     }
@@ -3102,7 +3101,7 @@ static void vfio_instance_finalize(Object *obj)
      *
      * g_free(vdev->igd_opregion);
      */
-    vfio_put_device(vdev);
+    vfio_put_pci_device(vdev);
 }
 
 static void vfio_exitfn(PCIDevice *pdev)
