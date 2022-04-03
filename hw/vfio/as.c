@@ -41,7 +41,7 @@
 #include "qapi/error.h"
 #include "migration/migration.h"
 
-static QLIST_HEAD(, VFIOAddressSpace) vfio_address_spaces =
+VFIOAddressSpaceList vfio_address_spaces =
     QLIST_HEAD_INITIALIZER(vfio_address_spaces);
 
 void vfio_host_win_add(VFIOIOMMUObj *iommu,
@@ -873,6 +873,7 @@ void vfio_put_address_space(VFIOAddressSpace *space)
 }
 
 static const VFIOIOMMUOps *iommu_ops[] = {
+    &iommufd_ops,
     &legacy_ops,
 };
 

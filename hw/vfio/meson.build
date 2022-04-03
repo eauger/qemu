@@ -4,6 +4,7 @@ vfio_ss.add(files(
   'as.c',
   'iommu-obj.c',
   'container.c',
+  'iommufd.c',
   'spapr.c',
   'migration.c',
 ))
