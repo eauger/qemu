@@ -204,7 +204,7 @@ static int vfio_dma_unmap(VFIOIOMMUObj *iommu,
         .size = size,
     };
 
-    if (iotlb && container->obj.dirty_pages_supported &&
+    if (iotlb && iommu->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
@@ -225,7 +225,7 @@ static int vfio_dma_unmap(VFIOIOMMUObj *iommu,
         if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
             container->iommu_type == VFIO_TYPE1v2_IOMMU) {
             trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->obj.pgsizes);
+            unmap.size -= 1ULL << ctz64(iommu->pgsizes);
             continue;
         }
         error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
@@ -362,7 +362,7 @@ static int vfio_container_add_section_window(VFIOIOMMUObj *iommu,
     }
 
     /* For now intersections are not allowed, we may relax this later */
-    QLIST_FOREACH(hostwin, &container->obj.hostwin_list, hostwin_next) {
+    QLIST_FOREACH(hostwin, &iommu->hostwin_list, hostwin_next) {
         if (ranges_overlap(hostwin->min_iova,
                            hostwin->max_iova - hostwin->min_iova + 1,
                            section->offset_within_address_space,
@@ -384,7 +384,7 @@ static int vfio_container_add_section_window(VFIOIOMMUObj *iommu,
         return ret;
     }
 
-    vfio_host_win_add(&container->obj, section->offset_within_address_space,
+    vfio_host_win_add(iommu, section->offset_within_address_space,
                       section->offset_within_address_space +
                       int128_get64(section->size) - 1, pgsize);
 #ifdef CONFIG_KVM
@@ -615,6 +615,7 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
 {
     struct vfio_info_cap_header *hdr;
     struct vfio_iommu_type1_info_cap_migration *cap_mig;
+    VFIOIOMMUObj *iommu = &container->obj;
 
     hdr = vfio_get_iommu_info_cap(info, VFIO_IOMMU_TYPE1_INFO_CAP_MIGRATION);
     if (!hdr) {
@@ -629,9 +630,9 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
      * qemu_real_host_page_size to mark those dirty.
      */
     if (cap_mig->pgsize_bitmap & qemu_real_host_page_size) {
-        container->obj.dirty_pages_supported = true;
-        container->obj.max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
-        container->obj.dirty_pgsizes = cap_mig->pgsize_bitmap;
+        iommu->dirty_pages_supported = true;
+        iommu->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
+        iommu->dirty_pgsizes = cap_mig->pgsize_bitmap;
     }
 }
 
@@ -736,8 +737,9 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     }
 
     container = g_malloc0(sizeof(*container));
+    iommu = &container->obj;
     container->fd = fd;
-    vfio_iommu_init(&container->obj, sizeof(container->obj), TYPE_VFIO_CONTAINER, space);
+    vfio_iommu_init(iommu, sizeof(container->obj), TYPE_VFIO_CONTAINER, space);
 
     ret = vfio_init_container(container, group->fd, errp);
     if (ret) {
@@ -769,13 +771,13 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
             /* Assume 4k IOVA page size */
             info->iova_pgsizes = 4096;
         }
-        vfio_host_win_add(&container->obj, 0, (hwaddr)-1, info->iova_pgsizes);
-        container->obj.pgsizes = info->iova_pgsizes;
+        vfio_host_win_add(iommu, 0, (hwaddr)-1, info->iova_pgsizes);
+        iommu->pgsizes = info->iova_pgsizes;
 
         /* The default in the kernel ("dma_entry_limit") is 65535. */
-        container->obj.dma_max_mappings = 65535;
+        iommu->dma_max_mappings = 65535;
         if (!ret) {
-            vfio_get_info_dma_avail(info, &container->obj.dma_max_mappings);
+            vfio_get_info_dma_avail(info, &iommu->dma_max_mappings);
             vfio_get_iommu_info_migration(container, info);
         }
         g_free(info);
@@ -804,10 +806,10 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
 
             memory_listener_register(&container->prereg_listener,
                                      &address_space_memory);
-            if (container->obj.error) {
+            if (iommu->error) {
                 memory_listener_unregister(&container->prereg_listener);
                 ret = -1;
-                error_propagate_prepend(errp, container->obj.error,
+                error_propagate_prepend(errp, iommu->error,
                     "RAM memory listener initialization failed: ");
                 goto enable_discards_exit;
             }
@@ -826,7 +828,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
         }
 
         if (v2) {
-            container->obj.pgsizes = info.ddw.pgsizes;
+            iommu->pgsizes = info.ddw.pgsizes;
             /*
              * There is a default window in just created container.
              * To make region_add/del simpler, we better remove this
@@ -841,8 +843,8 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
             }
         } else {
             /* The default table uses 4K pages */
-            container->obj.pgsizes = 0x1000;
-            vfio_host_win_add(&container->obj, info.dma32_window_start,
+            iommu->pgsizes = 0x1000;
+            vfio_host_win_add(iommu, info.dma32_window_start,
                               info.dma32_window_start +
                               info.dma32_window_size - 1,
                               0x1000);
@@ -853,28 +855,28 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     vfio_kvm_device_add_group(group);
 
     QLIST_INIT(&container->group_list);
-    QLIST_INSERT_HEAD(&space->iommus, &container->obj, next);
+    QLIST_INSERT_HEAD(&space->iommus, iommu, next);
 
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    container->obj.listener = vfio_memory_listener;
+    iommu->listener = vfio_memory_listener;
 
-    memory_listener_register(&container->obj.listener, container->obj.space->as);
+    memory_listener_register(&iommu->listener, iommu->space->as);
 
-    if (container->obj.error) {
+    if (iommu->error) {
         ret = -1;
-        error_propagate_prepend(errp, container->obj.error,
+        error_propagate_prepend(errp, iommu->error,
             "memory listener initialization failed: ");
         goto listener_release_exit;
     }
 
-    container->obj.initialized = true;
+    iommu->initialized = true;
 
     return 0;
 listener_release_exit:
     QLIST_REMOVE(group, container_next);
-    QLIST_REMOVE(&container->obj, next);
+    QLIST_REMOVE(iommu, next);
     vfio_kvm_device_del_group(group);
     vfio_listener_release(container);
 
