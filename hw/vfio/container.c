@@ -350,9 +350,6 @@ err_out:
 
 static void vfio_listener_release(VFIOLegacyContainer *container)
 {
-    VFIOContainer *bcontainer = &container->obj;
-
-    memory_listener_unregister(&bcontainer->listener);
     if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
         memory_listener_unregister(&container->prereg_listener);
     }
@@ -876,9 +873,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
-    bcontainer->listener = vfio_memory_listener;
-
-    memory_listener_register(&bcontainer->listener, bcontainer->space->as);
+    vfio_as_register_listener(bcontainer->space);
 
     if (bcontainer->error) {
         ret = -1;
@@ -922,10 +917,12 @@ static void vfio_disconnect_container(VFIOGroup *group)
     /*
      * Explicitly release the listener first before unset container,
      * since unset may destroy the backend container if it's the last
-     * group.
+     * group. By removing container from the list, container is disconnected
+     * with address space memory listener.
      */
     if (QLIST_EMPTY(&container->group_list)) {
         vfio_listener_release(container);
+        vfio_container_destroy(bcontainer);
     }
 
     if (ioctl(group->fd, VFIO_GROUP_UNSET_CONTAINER, &container->fd)) {
@@ -936,7 +933,6 @@ static void vfio_disconnect_container(VFIOGroup *group)
     if (QLIST_EMPTY(&container->group_list)) {
         VFIOAddressSpace *space = bcontainer->space;
 
-        vfio_container_destroy(bcontainer);
         trace_vfio_disconnect_container(container->fd);
         close(container->fd);
         g_free(container);

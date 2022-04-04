@@ -194,6 +194,7 @@ void vfio_host_win_add(VFIOContainer *bcontainer,
                        uint64_t iova_pgsizes);
 int vfio_host_win_del(VFIOContainer *bcontainer, hwaddr min_iova,
                       hwaddr max_iova);
+void vfio_as_register_listener(VFIOAddressSpace *space);
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);
 

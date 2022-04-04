@@ -388,14 +388,14 @@ static void vfio_unregister_ram_discard_listener(VFIOContainer *container,
     g_free(vrdl);
 }
 
-static void vfio_listener_region_add(MemoryListener *listener,
-                                     MemoryRegionSection *section)
+static void vfio_container_region_add(VFIOContainer *container,
+                                      MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
     hwaddr iova, end;
     Int128 llend, llsize;
     void *vaddr;
     int ret;
+    VFIOContainer *first = QLIST_FIRST(&container->space->containers);
     VFIOHostDMAWindow *hostwin;
     bool hostwin_found;
     Error *err = NULL;
@@ -533,11 +533,23 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
+    if (container != first &&
+        !vfio_container_dma_copy(first, container, iova,
+                                 int128_get64(llsize),
+                                 section->readonly)) {
+        return;
+    }
+
+    if (container != first) {
+        info_report("IOAS copy failed try map for container: %p", container);
+    }
+
     ret = vfio_container_dma_map(container, iova, int128_get64(llsize),
                                  vaddr, section->readonly);
     if (ret) {
-        error_setg(&err, "vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
+        error_setg(&err, "%s(%p, 0x%"HWADDR_PRIx", "
                    "0x%"HWADDR_PRIx", %p) = %d (%m)",
+                   (container == first)?"vfio_map_dma":"vfio_copy_dma",
                    container, iova, int128_get64(llsize), vaddr, ret);
         if (memory_region_is_ram_device(section->mr)) {
             /* Allow unexpected mappings not to be fatal for RAM devices */
@@ -573,10 +585,20 @@ fail:
     }
 }
 
-static void vfio_listener_region_del(MemoryListener *listener,
+static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    VFIOAddressSpace *space = container_of(listener, VFIOAddressSpace, listener);
+    VFIOContainer *container;
+
+    QLIST_FOREACH(container, &space->containers, next) {
+        vfio_container_region_add(container, section);
+    }
+}
+
+static void vfio_container_region_del(VFIOContainer *container,
+                                      MemoryRegionSection *section)
+{
     hwaddr iova, end;
     Int128 llend, llsize;
     int ret;
@@ -682,18 +704,35 @@ static void vfio_listener_region_del(MemoryListener *listener,
     vfio_container_del_section_window(container, section);
 }
 
+static void vfio_listener_region_del(MemoryListener *listener,
+                                     MemoryRegionSection *section)
+{
+    VFIOAddressSpace *space = container_of(listener, VFIOAddressSpace, listener);
+    VFIOContainer *container;
+
+    QLIST_FOREACH(container, &space->containers, next) {
+        vfio_container_region_del(container, section);
+    }
+}
+
 static void vfio_listener_log_global_start(MemoryListener *listener)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    VFIOAddressSpace *space = container_of(listener, VFIOAddressSpace, listener);
+    VFIOContainer *container;
 
-    vfio_container_set_dirty_page_tracking(container, true);
+    QLIST_FOREACH(container, &space->containers, next) {
+        vfio_container_set_dirty_page_tracking(container, true);
+    }
 }
 
 static void vfio_listener_log_global_stop(MemoryListener *listener)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
+    VFIOAddressSpace *space = container_of(listener, VFIOAddressSpace, listener);
+    VFIOContainer *container;
 
-    vfio_container_set_dirty_page_tracking(container, false);
+    QLIST_FOREACH(container, &space->containers, next) {
+        vfio_container_set_dirty_page_tracking(container, false);
+    }
 }
 
 typedef struct {
@@ -823,11 +862,9 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
                    int128_get64(section->size), ram_addr);
 }
 
-static void vfio_listener_log_sync(MemoryListener *listener,
-        MemoryRegionSection *section)
+static void vfio_container_log_sync(VFIOContainer *container,
+                                    MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer, listener);
-
     if (vfio_listener_skipped_section(section) ||
         !container->dirty_pages_supported) {
         return;
@@ -835,6 +872,17 @@ static void vfio_listener_log_sync(MemoryListener *listener,
 
     if (vfio_container_devices_all_dirty_tracking(container)) {
         vfio_sync_dirty_bitmap(container, section);
+    }
+}
+
+static void vfio_listener_log_sync(MemoryListener *listener,
+        MemoryRegionSection *section)
+{
+    VFIOAddressSpace *space = container_of(listener, VFIOAddressSpace, listener);
+    VFIOContainer *container;
+
+    QLIST_FOREACH(container, &space->containers, next) {
+        vfio_container_log_sync(container, section);
     }
 }
 
@@ -846,6 +894,17 @@ const MemoryListener vfio_memory_listener = {
     .log_global_stop = vfio_listener_log_global_stop,
     .log_sync = vfio_listener_log_sync,
 };
+
+void vfio_as_register_listener(VFIOAddressSpace *space)
+{
+    if (space->listener_initialized) {
+        memory_listener_unregister(&space->listener);
+    }
+    /* Unregistration happen in vfio_put_address_space() */
+    space->listener = vfio_memory_listener;
+    memory_listener_register(&space->listener, space->as);
+    space->listener_initialized = true;
+}
 
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 {
@@ -870,6 +929,7 @@ VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 void vfio_put_address_space(VFIOAddressSpace *space)
 {
     if (QLIST_EMPTY(&space->containers)) {
+        memory_listener_unregister(&space->listener);
         QLIST_REMOVE(space, list);
         g_free(space);
     }

@@ -40,6 +40,20 @@ int vfio_container_dma_map(VFIOContainer *container,
     return vccs->dma_map(container, iova, size, vaddr, readonly);
 }
 
+int vfio_container_dma_copy(VFIOContainer *src, VFIOContainer *dst,
+                            hwaddr iova, ram_addr_t size, bool readonly)
+{
+    VFIOContainerClass *vccs1 = VFIO_CONTAINER_OBJ_GET_CLASS(src);
+    VFIOContainerClass *vccs2 = VFIO_CONTAINER_OBJ_GET_CLASS(dst);
+
+    if (!vccs1->dma_copy || vccs1->dma_copy != vccs2->dma_copy) {
+        error_report("Incompatiable container: unable to copy dma");
+        return -EINVAL;
+    }
+
+    return vccs1->dma_copy(src, dst, iova, size, readonly);
+}
+
 int vfio_container_dma_unmap(VFIOContainer *container,
                              hwaddr iova, ram_addr_t size,
                              IOMMUTLBEntry *iotlb)
