@@ -445,7 +445,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
     }
 
     if (!hostwin_found) {
-        error_setg(&err, "Container %p can't map guest IOVA region"
+        error_setg(&err, "iommu %p can't map guest IOVA region"
                    " 0x%"HWADDR_PRIx"..0x%"HWADDR_PRIx, iommu, iova, end);
         goto fail;
     }
