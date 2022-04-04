@@ -30,16 +30,7 @@ int vfio_iommu_dma_map(VFIOIOMMUObj *iommu,
                        hwaddr iova, ram_addr_t size,
                        void *vaddr, bool readonly)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return -EINVAL;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return -EINVAL;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->dma_map) {
         return -EINVAL;
@@ -52,16 +43,7 @@ int vfio_iommu_dma_unmap(VFIOIOMMUObj *iommu,
                          hwaddr iova, ram_addr_t size,
                          IOMMUTLBEntry *iotlb)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return -EINVAL;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return -EINVAL;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->dma_unmap) {
         return -EINVAL;
@@ -72,16 +54,7 @@ int vfio_iommu_dma_unmap(VFIOIOMMUObj *iommu,
 
 void vfio_iommu_set_dirty_page_tracking(VFIOIOMMUObj *iommu, bool start)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->set_dirty_page_tracking) {
         return;
@@ -92,16 +65,7 @@ void vfio_iommu_set_dirty_page_tracking(VFIOIOMMUObj *iommu, bool start)
 
 bool vfio_iommu_devices_all_dirty_tracking(VFIOIOMMUObj *iommu)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return false;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return false;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->devices_all_dirty_tracking) {
         return false;
@@ -113,16 +77,7 @@ bool vfio_iommu_devices_all_dirty_tracking(VFIOIOMMUObj *iommu)
 int vfio_iommu_get_dirty_bitmap(VFIOIOMMUObj *iommu, uint64_t iova,
                                     uint64_t size, ram_addr_t ram_addr)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return -EINVAL;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return -EINVAL;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->get_dirty_bitmap) {
         return -EINVAL;
@@ -135,16 +90,7 @@ int vfio_iommu_add_section_window(VFIOIOMMUObj *iommu,
                                   MemoryRegionSection *section,
                                   Error **errp)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return -EINVAL;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return -EINVAL;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->add_window) {
         return 0;
@@ -156,16 +102,7 @@ int vfio_iommu_add_section_window(VFIOIOMMUObj *iommu,
 void vfio_iommu_del_section_window(VFIOIOMMUObj *iommu,
                                    MemoryRegionSection *section)
 {
-    VFIOIOMMUObjClass *vibjcs;
-
-    if (!iommu) {
-        return;
-    }
-
-    vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
-    if (!vibjcs) {
-        return;
-    }
+    VFIOIOMMUObjClass *vibjcs = VFIO_IOMMU_OBJ_GET_CLASS(iommu);
 
     if (!vibjcs->del_window) {
         return;
@@ -194,6 +131,30 @@ void vfio_iommu_init(void *_iommu, size_t instance_size,
 
 void vfio_iommu_destroy(VFIOIOMMUObj *iommu)
 {
+    VFIORamDiscardListener *vrdl, *vrdl_tmp;
+    VFIOGuestIOMMU *giommu, *tmp;
+    VFIOHostDMAWindow *hostwin, *next;
+
+    QLIST_FOREACH_SAFE(vrdl, &iommu->vrdl_list, next, vrdl_tmp) {
+        RamDiscardManager *rdm = memory_region_get_ram_discard_manager(vrdl->mr);
+
+        ram_discard_manager_unregister_listener(rdm, &vrdl->listener);
+        QLIST_REMOVE(vrdl, next);
+        g_free(vrdl);
+    }
+
+    QLIST_FOREACH_SAFE(giommu, &iommu->giommu_list, giommu_next, tmp) {
+        memory_region_unregister_iommu_notifier(
+                MEMORY_REGION(giommu->iommu_mr), &giommu->n);
+        QLIST_REMOVE(giommu, giommu_next);
+        g_free(giommu);
+    }
+
+    QLIST_FOREACH_SAFE(hostwin, &iommu->hostwin_list, hostwin_next,
+                       next) {
+        QLIST_REMOVE(hostwin, hostwin_next);
+        g_free(hostwin);
+    }
 
 }
 
