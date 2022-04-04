@@ -37,9 +37,38 @@ static int iommufd_map(VFIOIOMMUObj *iommu, hwaddr iova,
                        ram_addr_t size, void *vaddr, bool readonly)
 {
     VFIOIOMMUFDContainer *container = container_of(iommu, VFIOIOMMUFDContainer, obj);
+    int ret, iommufd;
+    uint32_t ioas_id;
 
-    return iommufd_map_dma(container->iommufd, container->ioas_id,
+    if (iova >= 0xfe000000)
+        printf("%s - 1\n", __func__);
+    ret = iommu_get_ioas(&iommufd, &ioas_id);
+    if (ret < 0) {
+    if (iova >= 0xfe000000)
+        printf("%s fail to get ioas_id\n", __func__);
+	return ret;
+    } else {
+        if (iova >= 0xfe000000)
+        printf("%s got iommufd: %d ioas_id: %u\n", __func__, iommufd, ioas_id);
+    }
+
+    ret = iommufd_map_dma(iommufd, ioas_id,
                            iova, size, vaddr, readonly);
+    if (!ret) {
+    if (iova >= 0xfe000000)
+        printf("%s succ to map dummy ioas_id\n", __func__);
+    } else {
+    if (iova >= 0xfe000000)
+        printf("%s fail to map dummy ioas_id\n", __func__);
+	return ret;
+    }
+    if (iova >= 0xfe000000)
+    printf("%s copy dummy ioas_id to target ioas_id\n", __func__);
+    ret = iommufd_copy_dma(container->iommufd, ioas_id, container->ioas_id,
+		           iova, size, vaddr, readonly);
+    if (iova >= 0xfe000000)
+    printf("%s copy dummy ioas_id to target ioas_id %s\n", __func__, ret?"failed":"succ");
+    return ret;
 }
 
 static int iommufd_unmap(VFIOIOMMUObj *iommu,
