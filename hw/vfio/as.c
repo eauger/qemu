@@ -967,8 +967,14 @@ select_iommu_backend(OnOffAuto value, Error **errp)
 
     if (value == ON_OFF_AUTO_OFF) {
         ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+	error_report("%s OFF (%d)", __func__, value);
     } else {
         int iommufd = qemu_open_old("/dev/iommu", O_RDWR);
+	if (value == ON_OFF_AUTO_ON) {
+	    error_report("%s ON (%d)", __func__, value);
+	} else {
+	    error_report("%s AUTO (%d)", __func__, value);
+	}
 
         ops = vfio_iommu_ops(VFIO_IOMMU_BACKEND_TYPE_IOMMUFD);
         if (iommufd < 0 || !ops) {
