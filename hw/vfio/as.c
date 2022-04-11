@@ -27,6 +27,7 @@
 
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio.h"
+#include "hw/vfio/vfio-container-obj.h"
 #include "exec/address-spaces.h"
 #include "exec/memory.h"
 #include "exec/ram_addr.h"
@@ -873,4 +874,40 @@ void vfio_put_address_space(VFIOAddressSpace *space)
         QLIST_REMOVE(space, list);
         g_free(space);
     }
+}
+
+static VFIOContainerClass *
+vfio_get_container_class(VFIOIOMMUBackendType be)
+{
+    ObjectClass *klass;
+
+    switch (be) {
+    case VFIO_IOMMU_BACKEND_TYPE_LEGACY:
+        klass = object_class_by_name(TYPE_VFIO_LEGACY_CONTAINER);
+        return VFIO_CONTAINER_OBJ_CLASS(klass);
+    default:
+        return NULL;
+    }
+}
+
+int vfio_attach_device(VFIODevice *vbasedev, AddressSpace *as, Error **errp)
+{
+    VFIOContainerClass *vccs;
+
+    vccs = vfio_get_container_class(VFIO_IOMMU_BACKEND_TYPE_LEGACY);
+    if (!vccs) {
+        return -ENOENT;
+    }
+    return vccs->attach_device(vbasedev, as, errp);
+}
+
+void vfio_detach_device(VFIODevice *vbasedev)
+{
+    VFIOContainerClass *vccs;
+
+    if (!vbasedev->container) {
+        return;
+    }
+    vccs = VFIO_CONTAINER_OBJ_GET_CLASS(vbasedev->container);
+    vccs->detach_device(vbasedev);
 }
