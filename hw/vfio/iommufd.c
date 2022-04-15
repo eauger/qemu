@@ -449,14 +449,7 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
 
     ret = vfio_ram_block_discard_disable(true);
     if (ret) {
-        vfio_device_detach_container(vbasedev, container, &err);
-        error_propagate(errp, err);
-        error_prepend(errp, "Cannot set discarding of RAM broken (%d)", -ret);
-        vfio_iommufd_container_destroy(container);
-        iommufd_put_ioas(iommufd, ioas_id);
-        vfio_put_address_space(space);
-        close(vbasedev->fd);
-        return ret;
+        goto error;
     }
 
     /*
@@ -472,6 +465,13 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
      */
 
     vfio_as_add_container(space, bcontainer);
+
+    if (bcontainer->error) {
+        ret = -1;
+        error_propagate_prepend(errp, bcontainer->error,
+            "memory listener initialization failed: ");
+        goto error;
+    }
     bcontainer->initialized = true;
 
 out:
@@ -488,13 +488,8 @@ out:
     ret = ioctl(devfd, VFIO_DEVICE_GET_INFO, &dev_info);
     if (ret) {
         error_setg_errno(errp, errno, "error getting device info");
-        /*
-         * Needs to use iommufd_detach_device() as this may be failed after
-         * attaching a new deivce to an existing container.
-         */
-        iommufd_detach_device(vbasedev);
-        close(vbasedev->fd);
-        return ret;
+        vfio_as_del_container(space, bcontainer);
+        goto error;
     }
 
     vbasedev->group = 0;
@@ -509,6 +504,14 @@ out:
     trace_vfio_iommufd_device_info(vbasedev->name, devfd, vbasedev->num_irqs,
                                    vbasedev->num_regions, vbasedev->flags);
     return 0;
+error:
+    vfio_device_detach_container(vbasedev, container, &err);
+    error_propagate(errp, err);
+    vfio_iommufd_container_destroy(container);
+    iommufd_put_ioas(iommufd, ioas_id);
+    vfio_put_address_space(space);
+    close(vbasedev->fd);
+    return ret;
 }
 
 static void iommufd_detach_device(VFIODevice *vbasedev)
