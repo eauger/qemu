@@ -303,8 +303,23 @@ struct iommu_stage1_config_vtd {
 					 IOMMU_VTD_PGTBL_PCD |  \
 					 IOMMU_VTD_PGTBL_PWT)
 
+struct iommu_stage1_config_smmu {
+#define IOMMU_SMMU_FORMAT_SMMUV3	1
+	__u32 format;
+	__u32 vmid;
+#define IOMMU_SMMU_CONFIG_TRANSLATE	1
+#define IOMMU_SMMU_CONFIG_BYPASS	2
+#define IOMMU_SMMU_CONFIG_ABORT		3
+	__u32 config;
+	__u32 __reserved;
+	__u64 s1cdmax;
+	__u64 s1fmt;
+	__u64 s1dss;
+};
+
 union iommu_stage1_config {
 	struct iommu_stage1_config_vtd vtd;
+	struct iommu_stage1_config_smmu smmu;
 };
 
 /**
