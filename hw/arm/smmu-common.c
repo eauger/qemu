@@ -25,6 +25,9 @@
 #include "qemu/jhash.h"
 #include "qemu/module.h"
 
+#include <linux/iommufd.h>
+#include "hw/iommufd/iommufd.h"
+
 #include "qemu/error-report.h"
 #include "hw/arm/smmu-common.h"
 #include "smmu-internal.h"
@@ -523,6 +526,11 @@ static void smmu_base_realize(DeviceState *dev, Error **errp)
     s->iotlb = g_hash_table_new_full(smmu_iotlb_key_hash, smmu_iotlb_key_equal,
                                      g_free, g_free);
     s->smmu_pcibus_by_busptr = g_hash_table_new(NULL, NULL);
+
+    s->iommufd = iommufd_get();
+    if (s->iommufd < 0) {
+        error_report("Failed to get iommufd");
+    }
 
     if (s->primary_bus) {
         pci_setup_iommu(s->primary_bus, &smmu_ops, s);

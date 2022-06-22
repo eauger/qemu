@@ -108,6 +108,7 @@ struct SMMUState {
     SysBusDevice  dev;
     const char *mrtypename;
     MemoryRegion iomem;
+    int iommufd; /* /dev/iommu FD */
 
     GHashTable *smmu_pcibus_by_busptr;
     GHashTable *configs; /* cache for configuration data */
