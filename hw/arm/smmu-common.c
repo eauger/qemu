@@ -514,6 +514,178 @@ static const PCIIOMMUOps smmu_ops = {
     .unset_iommu_device = smmu_dev_unset_iommu_device,
 };
 
+static void smmu_iommu_inject_faults(void *opaque)
+{
+    struct iommufd_stage1_dma_fault header;
+    struct iommu_fault *queue = NULL;
+    char *queue_buffer = NULL;
+    SMMUHwpt *hwpt = opaque;
+    ssize_t bytes;
+
+    if (!event_notifier_test_and_clear(&hwpt->notifier)) {
+        return;
+    }
+
+    bytes = pread(hwpt->fault_fd, &header, sizeof(header), 0);
+    if (bytes != sizeof(header)) {
+        error_report("%s unable to read the fault region header (0x%lx)",
+                     __func__, bytes);
+        return;
+    }
+
+    if (!queue) {
+        size_t queue_size = header.nb_entries * header.entry_size;
+
+        queue_buffer = g_malloc(queue_size);
+        bytes =  pread(hwpt->fault_fd, queue_buffer, queue_size, header.offset);
+        if (bytes != queue_size) {
+            error_report("%s unable to read the fault queue (0x%lx)",
+                         __func__, bytes);
+            return;
+        }
+
+        queue = (struct iommu_fault *)queue_buffer;
+    }
+
+    while (hwpt->fault_tail_index != header.head) {
+        if (!hwpt->fault_handler) {
+            hwpt->fault_handler(hwpt->smmu, &queue[hwpt->fault_tail_index]);
+        }
+        hwpt->fault_tail_index =
+            (hwpt->fault_tail_index + 1) % header.nb_entries;
+    }
+    bytes = pwrite(hwpt->fault_fd, &hwpt->fault_tail_index, 4, 0);
+    if (bytes != 4) {
+        error_report("%s unable to write the fault region tail index (0x%lx)",
+                     __func__, bytes);
+    }
+    g_free(queue_buffer);
+}
+
+/* IOMMUFD helpers */
+int smmu_iommu_alloc_s1_hwpt(SMMUState *s, SMMUDevice *sdev, dma_addr_t s1ptr,
+                             union iommu_stage1_config *iommu_config,
+                             void (*fault_handler)(void *, struct iommu_fault *))
+{
+    IOMMUFDDevice *idev;
+    SMMUHwpt *hwpt;
+    int ret;
+
+    if (!s || s->iommufd < 0 || !sdev) {
+        return -ENOENT;
+    }
+
+    idev = sdev->idev;
+    if (!idev) {
+        return -ENOENT;
+    }
+
+    QLIST_FOREACH(hwpt, &s->hwpts, next) {
+        if (hwpt->s1ptr == s1ptr)
+            return 0;
+    }
+
+    hwpt = g_new0(SMMUHwpt, 1);
+    if (!hwpt) {
+        return -ENOMEM;
+    }
+
+    hwpt->smmu = sdev->smmu;
+    hwpt->fault_handler = fault_handler;
+
+    ret = event_notifier_init(&hwpt->notifier, 0);
+    if (ret) {
+        error_report("Unable to init event notifier for dma fault: %d", ret);
+        return ret;
+    }
+
+    hwpt->eventfd = event_notifier_get_fd(&hwpt->notifier);
+
+    ret = iommufd_alloc_s1_hwpt(idev->iommufd, idev->dev_id, s1ptr,
+                                idev->hwpt_id, hwpt->eventfd, iommu_config,
+                                &hwpt->hwpt_id, &hwpt->fault_fd);
+    if (ret) {
+        error_report("Unable to allocate stage-1 HW pagetable: %d", ret);
+        return ret;
+    }
+
+    ret = iommu_device_attach_stage1(idev, NULL, hwpt->hwpt_id);
+    if (ret) {
+        error_report("Unable to attach dev to stage-1 HW pagetable: %d", ret);
+        return ret;
+    }
+
+    QLIST_INSERT_HEAD(&s->hwpts, hwpt, next);
+
+    qemu_set_fd_handler(hwpt->eventfd, smmu_iommu_inject_faults, NULL, hwpt);
+
+    sdev->hwpt = hwpt;
+
+    return 0;
+}
+
+int smmu_iommu_invalidate_cache(SMMUDevice *sdev,
+                                struct iommu_cache_invalidate_info *cache_info)
+{
+    IOMMUFDDevice *idev;
+    SMMUHwpt *hwpt;
+
+    if (!sdev) {
+        return -ENOENT;
+    }
+
+    idev = sdev->idev;
+    hwpt = sdev->hwpt;
+
+    if (!idev || !hwpt) {
+        return -ENOENT;
+    }
+
+    return iommufd_invalidate_cache(idev->iommufd, hwpt->hwpt_id, cache_info);
+}
+
+int smmu_iommu_send_page_response(SMMUDevice *sdev,
+                                  struct iommu_page_response *pg_resp)
+{
+    IOMMUFDDevice *idev;
+    SMMUHwpt *hwpt;
+
+    if (!sdev) {
+        return -ENOENT;
+    }
+
+    idev = sdev->idev;
+    hwpt = sdev->hwpt;
+
+    if (!idev || !hwpt) {
+        return -ENOENT;
+    }
+
+    return iommufd_page_response(idev->iommufd, hwpt->hwpt_id,
+                                 idev->dev_id, pg_resp);
+}
+
+int smmu_iommu_alloc_host_pasid(SMMUState *s, uint32_t max,
+                                bool identical, uint32_t *pasid)
+{
+    if (s->iommufd < 0) {
+        error_report("%s: No available allocation interface", __func__);
+        return -1;
+    }
+
+    return iommufd_alloc_pasid(s->iommufd, 1, max, identical, pasid);
+}
+
+int smmu_iommu_free_host_pasid(SMMUState *s, uint32_t pasid)
+{
+    if (s->iommufd < 0) {
+        error_report("%s: No available allocation interface", __func__);
+        return -1;
+    }
+
+    return iommufd_free_pasid(s->iommufd, pasid);
+}
+
 IOMMUMemoryRegion *smmu_iommu_mr(SMMUState *s, uint32_t sid)
 {
     uint8_t bus_n, devfn;
