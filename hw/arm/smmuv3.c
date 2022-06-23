@@ -835,6 +835,7 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
         granule = tg * 2 + 10;
     }
 
+#if 0
     event.type = IOMMU_NOTIFIER_UNMAP;
     event.entry.target_as = &address_space_memory;
     event.entry.iova = iova;
@@ -842,6 +843,7 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
     event.entry.perm = IOMMU_NONE;
 
     memory_region_notify_iommu_one(n, &event);
+#endif
 
     cache_info.version = IOMMU_CACHE_INVALIDATE_INFO_VERSION_1;
     cache_info.cache = IOMMU_CACHE_INV_TYPE_IOTLB;
@@ -1249,7 +1251,7 @@ static int smmuv3_cmdq_consume(SMMUv3State *s)
         case SMMU_CMD_TLBI_NH_ALL:
         case SMMU_CMD_TLBI_NSNH_ALL:
             trace_smmuv3_cmdq_tlbi_nh();
-            smmu_inv_notifiers_all(&s->smmu_state);
+            //smmu_inv_notifiers_all(&s->smmu_state);
             smmuv3_notify_all_inv(&s->smmu_state);
             smmu_iotlb_inv_all(bs);
             break;
@@ -1747,6 +1749,7 @@ static int smmuv3_notify_flag_changed(IOMMUMemoryRegion *iommu,
         return -EINVAL;
     }
 
+#if 0 /* FIXME */
     if (new & IOMMU_NOTIFIER_MAP) {
         error_setg(errp,
                    "device %02x.%02x.%x requires iommu MAP notifier which is "
@@ -1754,6 +1757,7 @@ static int smmuv3_notify_flag_changed(IOMMUMemoryRegion *iommu,
                    PCI_SLOT(sdev->devfn), PCI_FUNC(sdev->devfn));
         return -EINVAL;
     }
+#endif
 
     if (old == IOMMU_NOTIFIER_NONE) {
         trace_smmuv3_notify_flag_add(iommu->parent_obj.name);

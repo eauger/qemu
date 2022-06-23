@@ -459,6 +459,7 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
      */
     vfio_host_win_add(bcontainer, 0, (hwaddr)-1, sysconf(_SC_PAGE_SIZE));
     bcontainer->pgsizes = sysconf(_SC_PAGE_SIZE);
+    bcontainer->nested = true; /* FIXME */
 
     /*
      * TODO: kvmgroup, unable to do it before the protocol done

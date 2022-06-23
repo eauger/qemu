@@ -650,7 +650,10 @@ static void vfio_container_region_add(VFIOContainer *container,
             goto fail;
         }
         QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
-        memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
+
+        if (0 && !container->nested) { /* FIXME */
+            memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
+        }
 
         return;
     }
@@ -978,6 +981,40 @@ VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
     return space;
 }
 
+static void vfio_prereg_listener_region_add(MemoryListener *listener,
+                                            MemoryRegionSection *section)
+{
+    VFIOContainer *container =
+        container_of(listener, VFIOContainer, prereg_listener);
+    Error *err = NULL;
+
+    if (!memory_region_is_ram(section->mr)) {
+        return;
+    }
+
+    vfio_dma_map_ram_section(container, NULL, section, &err);
+    if (err) {
+        error_report_err(err);
+    }
+}
+static void vfio_prereg_listener_region_del(MemoryListener *listener,
+                                     MemoryRegionSection *section)
+{
+    VFIOContainer *container =
+        container_of(listener, VFIOContainer, prereg_listener);
+
+    if (!memory_region_is_ram(section->mr)) {
+        return;
+    }
+
+    vfio_dma_unmap_ram_section(container, section);
+}
+
+static MemoryListener vfio_memory_prereg_listener = {
+    .region_add = vfio_prereg_listener_region_add,
+    .region_del = vfio_prereg_listener_region_del,
+};
+
 void vfio_as_add_container(VFIOAddressSpace *space,
                            VFIOContainer *container)
 {
@@ -991,6 +1028,12 @@ void vfio_as_add_container(VFIOAddressSpace *space,
     space->listener = vfio_memory_listener;
     memory_listener_register(&space->listener, space->as);
     space->listener_initialized = true;
+
+    if (container->nested) {
+        container->prereg_listener = vfio_memory_prereg_listener;
+        memory_listener_register(&container->prereg_listener,
+                                 &address_space_memory);
+    }
 }
 
 void vfio_as_del_container(VFIOAddressSpace *space,
