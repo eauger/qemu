@@ -933,6 +933,25 @@ static void smmuv3_s1_range_inval(SMMUState *s, Cmd *cmd)
     }
 }
 
+/* Unmap all IOTLBs of all sdev's */
+static void smmuv3_notify_all_inv(SMMUState *s)
+{
+#ifdef __linux__
+    struct iommu_cache_invalidate_info cache_info = {};
+    SMMUDevice *sdev;
+
+    cache_info.version = IOMMU_CACHE_INVALIDATE_INFO_VERSION_1;
+    cache_info.cache = IOMMU_CACHE_INV_TYPE_IOTLB;
+    cache_info.granularity = IOMMU_INV_GRANU_DOMAIN;
+
+    QLIST_FOREACH(sdev, &s->devices_with_notifiers, next) {
+        if (smmu_iommu_invalidate_cache(sdev, &cache_info)) {
+            error_report("Cache flush failed");
+        }
+    }
+#endif
+}
+
 static void smmuv3_notify_config_change(SMMUState *bs, uint32_t sid)
 {
 #ifdef __linux__
@@ -986,6 +1005,8 @@ static void smmuv3_notify_config_change(SMMUState *bs, uint32_t sid)
         error_report("Unable to alloc Stage-1 HW Page Table: %d", ret);
         return;
     }
+
+    smmuv3_notify_all_inv(bs);
 #endif
 }
 
@@ -1134,6 +1155,7 @@ static int smmuv3_cmdq_consume(SMMUv3State *s)
         case SMMU_CMD_TLBI_NSNH_ALL:
             trace_smmuv3_cmdq_tlbi_nh();
             smmu_inv_notifiers_all(&s->smmu_state);
+            smmuv3_notify_all_inv(&s->smmu_state);
             smmu_iotlb_inv_all(bs);
             break;
         case SMMU_CMD_TLBI_NH_VAA:
