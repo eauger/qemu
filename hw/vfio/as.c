@@ -481,6 +481,7 @@ static int vfio_dma_map_ram_section(VFIOContainer *container,
         if (memory_region_is_ram_device(section->mr)) {
             /* Allow unexpected mappings not to be fatal for RAM devices */
             error_report_err(*err);
+	    *err = NULL;
             return 0;
         }
         return ret;
