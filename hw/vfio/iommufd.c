@@ -374,6 +374,8 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
     VFIOIOMMUFDContainer *container;
     VFIOAddressSpace *space;
     IOMMUFDDevice *idev = &vbasedev->idev;
+    IOMMUMemoryRegion *iommu_mr;
+    bool nested = false;
     VFIOIOASHwpt *hwpt;
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
     int ret, devfd, iommufd;
@@ -433,6 +435,14 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
     QLIST_INIT(&container->hwpt_list);
 
     bcontainer = &container->obj;
+
+    if (memory_region_is_iommu(as->root)) {
+        iommu_mr = IOMMU_MEMORY_REGION(as->root);
+        memory_region_iommu_get_attr(iommu_mr, IOMMU_ATTR_VFIO_NESTED,
+                                     (void *)&nested);
+	bcontainer->nested = true;
+    }
+
     vfio_container_init(bcontainer, sizeof(*bcontainer),
                         TYPE_VFIO_IOMMUFD_CONTAINER, space);
 
