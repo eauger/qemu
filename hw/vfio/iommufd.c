@@ -33,6 +33,7 @@
 #include "hw/qdev-core.h"
 #include "sysemu/reset.h"
 #include "qemu/cutils.h"
+#include "exec/address-spaces.h"
 
 static bool iommufd_check_extension(VFIOContainer *bcontainer,
                                     VFIOContainerFeature feat)
@@ -440,11 +441,14 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
         iommu_mr = IOMMU_MEMORY_REGION(as->root);
         memory_region_iommu_get_attr(iommu_mr, IOMMU_ATTR_VFIO_NESTED,
                                      (void *)&nested);
-	bcontainer->nested = true;
     }
 
     vfio_container_init(bcontainer, sizeof(*bcontainer),
                         TYPE_VFIO_IOMMUFD_CONTAINER, space);
+    if (nested) {
+	error_report("%s set nested to TRUE\n", __func__);
+	bcontainer->nested = true;
+    }
 
     ret = vfio_device_attach_container(vbasedev, container, &err);
     if (ret) {
@@ -469,6 +473,20 @@ static int iommufd_attach_device(VFIODevice *vbasedev, AddressSpace *as,
      */
     vfio_host_win_add(bcontainer, 0, (hwaddr)-1, sysconf(_SC_PAGE_SIZE));
     bcontainer->pgsizes = sysconf(_SC_PAGE_SIZE);
+
+    if (bcontainer->nested) {
+        bcontainer->prereg_listener = vfio_nested_prereg_listener;
+        memory_listener_register(&bcontainer->prereg_listener,
+                                 &address_space_memory);
+        if (bcontainer->error) {
+            memory_listener_unregister(&bcontainer->prereg_listener);
+            ret = -1;
+            error_propagate_prepend(errp, bcontainer->error,
+                                "RAM memory listener initialization failed "
+                                "for container");
+            goto error;
+        }
+    }
 
     /*
      * TODO: kvmgroup, unable to do it before the protocol done

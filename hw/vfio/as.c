@@ -183,6 +183,79 @@ static bool vfio_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
     return true;
 }
 
+/* Propagate a guest IOTLB invalidation to the host (nested mode) */
+static void vfio_nested_unmap_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
+{
+    VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
+    //VFIOContainer *container = giommu->container;
+    IOMMUMemoryRegion *iommu_mr = giommu->iommu_mr;
+    struct iommu_cache_invalidate_info cache_info = {};
+    //int ret;
+
+    assert(iotlb->perm == IOMMU_NONE);
+
+    cache_info.version = IOMMU_CACHE_INVALIDATE_INFO_VERSION_1;
+    cache_info.cache = IOMMU_CACHE_INV_TYPE_IOTLB;
+
+    switch (iotlb->granularity) {
+    case IOMMU_INV_GRAN_DOMAIN:
+        cache_info.granularity = IOMMU_INV_GRANU_DOMAIN;
+        break;
+    case IOMMU_INV_GRAN_PASID:
+    {
+        int archid = -1;
+#if 0
+        struct iommu_inv_pasid_info *pasid_info;
+
+        pasid_info = &ustruct.info.granu.pasid_info;
+        ustruct.info.granularity = IOMMU_INV_GRANU_PASID;
+        if (iotlb->flags & IOMMU_INV_FLAGS_ARCHID) {
+            pasid_info->flags |= IOMMU_INV_ADDR_FLAGS_ARCHID;
+            archid = iotlb->arch_id;
+        }
+        pasid_info->archid = archid;
+#endif
+        trace_vfio_iommu_asid_inv_iotlb(archid);
+        break;
+    }
+    case IOMMU_INV_GRAN_ADDR:
+    {
+        hwaddr start = iotlb->iova + giommu->iommu_offset;
+        size_t size = iotlb->addr_mask + 1;
+        int archid = -1;
+
+        cache_info.granularity = IOMMU_INV_GRANU_ADDR;
+        if (iotlb->flags & IOMMU_INV_FLAGS_LEAF) {
+            cache_info.granu.addr_info.flags |= IOMMU_INV_ADDR_FLAGS_LEAF;
+        }
+        if (iotlb->flags & IOMMU_INV_FLAGS_ARCHID) {
+            cache_info.granu.addr_info.flags |= IOMMU_INV_ADDR_FLAGS_ARCHID;
+            archid = iotlb->arch_id;
+        }
+        if (iotlb->flags & IOMMU_INV_FLAGS_GRANULE) {
+            cache_info.granu.addr_info.granule_size = 1ULL << iotlb->granule;
+            cache_info.granu.addr_info.nb_granules = size >> iotlb->granule;
+        } else {
+            error_report_once("Guest does not use range invalidation support, upgrade it!");
+            return;
+        }
+        cache_info.granu.addr_info.archid = archid;
+        cache_info.granu.addr_info.addr = start;
+        trace_vfio_iommu_addr_inv_iotlb(archid, start, size,
+                                        1, iotlb->leaf);
+        break;
+    }
+    }
+
+    memory_region_invalidate_cache(iommu_mr, &cache_info);
+#if 0
+    ret = ioctl(container->fd, VFIO_IOMMU_CACHE_INVALIDATE, &ustruct);
+    if (ret) {
+        error_report("%p: failed to invalidate CACHE (%d)", container, ret);
+    }
+#endif
+}
+
 static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
@@ -553,6 +626,35 @@ static void vfio_dma_unmap_ram_section(VFIOContainer *container,
     }
 }
 
+static void vfio_prereg_listener_region_add(MemoryListener *listener,
+                                            MemoryRegionSection *section)
+{
+    VFIOContainer *container =
+        container_of(listener, VFIOContainer, prereg_listener);
+    Error *err = NULL;
+
+    if (!memory_region_is_ram(section->mr)) {
+        return;
+    }
+
+    vfio_dma_map_ram_section(container, NULL, section, &err);
+    if (err) {
+        error_report_err(err);
+    }
+}
+static void vfio_prereg_listener_region_del(MemoryListener *listener,
+                                     MemoryRegionSection *section)
+{
+    VFIOContainer *container =
+        container_of(listener, VFIOContainer, prereg_listener);
+
+    if (!memory_region_is_ram(section->mr)) {
+        return;
+    }
+
+    vfio_dma_unmap_ram_section(container, section);
+}
+
 static void vfio_container_region_add(VFIOContainer *container,
                                       VFIOContainer **src_container,
                                       MemoryRegionSection *section)
@@ -609,9 +711,10 @@ static void vfio_container_region_add(VFIOContainer *container,
     memory_region_ref(section->mr);
 
     if (memory_region_is_iommu(section->mr)) {
+        IOMMUNotify notify;
         VFIOGuestIOMMU *giommu;
         IOMMUMemoryRegion *iommu_mr = IOMMU_MEMORY_REGION(section->mr);
-        int iommu_idx;
+        int iommu_idx, flags;
 
         trace_vfio_listener_region_add_iommu(iova, end);
         /*
@@ -630,7 +733,18 @@ static void vfio_container_region_add(VFIOContainer *container,
         llend = int128_sub(llend, int128_one());
         iommu_idx = memory_region_iommu_attrs_to_index(iommu_mr,
                                                        MEMTXATTRS_UNSPECIFIED);
-        iommu_notifier_init(&giommu->n, vfio_iommu_map_notify,
+
+        if (container->nested) {
+            /* IOTLB unmap notifier to propagate guest IOTLB invalidations */
+            flags = IOMMU_NOTIFIER_UNMAP;
+            notify = vfio_nested_unmap_notify;
+        } else {
+            /* MAP/UNMAP IOTLB notifier */
+            flags = IOMMU_NOTIFIER_IOTLB_EVENTS;
+            notify = vfio_iommu_map_notify;
+        }
+
+        iommu_notifier_init(&giommu->n, notify,
                             IOMMU_NOTIFIER_IOTLB_EVENTS,
                             section->offset_within_region,
                             int128_get64(llend),
@@ -651,7 +765,13 @@ static void vfio_container_region_add(VFIOContainer *container,
             goto fail;
         }
         QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
-        memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
+	error_report("*** %s nested=%d MAP notifier=%d\n", __func__, 
+			container->nested, flags & IOMMU_NOTIFIER_MAP);
+        if (flags & IOMMU_NOTIFIER_MAP) {
+	    error_report("%s call replay\n", __func__);
+            memory_region_iommu_replay(giommu->iommu_mr, &giommu->n);
+	    error_report("%s replay completes\n", __func__);
+        }
 
         return;
     }
@@ -942,6 +1062,11 @@ const MemoryListener vfio_memory_listener = {
     .log_global_start = vfio_listener_log_global_start,
     .log_global_stop = vfio_listener_log_global_stop,
     .log_sync = vfio_listener_log_sync,
+};
+
+const MemoryListener vfio_nested_prereg_listener = {
+    .region_add = vfio_prereg_listener_region_add,
+    .region_del = vfio_prereg_listener_region_del,
 };
 
 void vfio_reset_handler(void *opaque)

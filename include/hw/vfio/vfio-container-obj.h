@@ -105,6 +105,7 @@ struct VFIOContainer {
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
     QLIST_ENTRY(VFIOContainer) next;
+    MemoryListener prereg_listener;
 };
 
 typedef struct VFIODevice VFIODevice;
