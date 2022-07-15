@@ -200,6 +200,7 @@ static void vfio_nested_unmap_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     switch (iotlb->granularity) {
     case IOMMU_INV_GRAN_DOMAIN:
         cache_info.granularity = IOMMU_INV_GRANU_DOMAIN;
+	trace_vfio_iommu_asid_inv_domain();
         break;
     case IOMMU_INV_GRAN_PASID:
     {
