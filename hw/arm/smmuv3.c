@@ -840,6 +840,7 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
         granule = tt->granule_sz;
     } else {
         granule = tg * 2 + 10;
+	event.entry.flags = IOMMU_INV_FLAGS_GRANULE;
     }
 
     event.type = IOMMU_NOTIFIER_UNMAP;
@@ -847,7 +848,7 @@ static void smmuv3_notify_iova(IOMMUMemoryRegion *mr,
     event.entry.iova = iova;
     event.entry.addr_mask = num_pages * (1 << granule) - 1;
     event.entry.perm = IOMMU_NONE;
-    event.entry.flags = IOMMU_INV_FLAGS_ARCHID;
+    event.entry.flags |= IOMMU_INV_FLAGS_ARCHID;
     event.entry.arch_id = asid;
 
     memory_region_notify_iommu_one(n, &event);
