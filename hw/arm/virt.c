@@ -779,6 +779,9 @@ static void create_gic(VirtMachineState *vms, MemoryRegion *mem)
                                          OBJECT(mem), &error_fatal);
                 qdev_prop_set_bit(vms->gic, "has-lpi", true);
             }
+        } else {
+            qdev_prop_set_bit(vms->gic, "has-virtualization-extensions",
+                              vms->virt);
         }
     } else {
         if (!kvm_irqchip_in_kernel()) {
