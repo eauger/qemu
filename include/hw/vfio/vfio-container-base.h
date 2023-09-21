@@ -29,10 +29,15 @@
 #include "exec/hwaddr.h"
 #endif
 
-typedef struct VFIOAddressSpace VFIOAddressSpace;
 typedef struct VFIOContainer VFIOContainer;
 typedef struct VFIODevice VFIODevice;
 typedef struct VFIOIOMMUBackendOpsClass VFIOIOMMUBackendOpsClass;
+
+typedef struct VFIOAddressSpace {
+    AddressSpace *as;
+    QLIST_HEAD(, VFIOContainer) containers;
+    QLIST_ENTRY(VFIOAddressSpace) list;
+} VFIOAddressSpace;
 
 typedef struct VFIOGuestIOMMU {
     VFIOContainer *container;
@@ -53,7 +58,9 @@ typedef struct {
  */
 struct VFIOContainer {
     VFIOIOMMUBackendOpsClass *ops;
+    VFIOAddressSpace *space;
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
+    QLIST_ENTRY(VFIOContainer) next;
 };
 
 VFIODevice *vfio_container_dev_iter_next(VFIOContainer *container,
@@ -66,6 +73,7 @@ int vfio_container_dma_unmap(VFIOContainer *container,
                              IOMMUTLBEntry *iotlb);
 
 void vfio_container_init(VFIOContainer *container,
+                         VFIOAddressSpace *space,
                          struct VFIOIOMMUBackendOpsClass *ops);
 void vfio_container_destroy(VFIOContainer *container);
 

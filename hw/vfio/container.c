@@ -94,7 +94,7 @@ static VFIODevice *vfio_legacy_dev_iter_next(VFIOContainer *bcontainer,
 
 bool vfio_viommu_preset(VFIODevice *vbasedev)
 {
-    return vbasedev->group->container->space->as != &address_space_memory;
+    return vbasedev->group->container->bcontainer.space->as != &address_space_memory;
 }
 
 static int vfio_dma_unmap_bitmap(VFIOLegacyContainer *container,
@@ -611,7 +611,8 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
      * details once we know which type of IOMMU we are using.
      */
 
-    QLIST_FOREACH(container, &space->containers, next) {
+    QLIST_FOREACH(bcontainer, &space->containers, next) {
+        container = container_of(bcontainer, VFIOLegacyContainer, bcontainer);
         if (!ioctl(group->fd, VFIO_GROUP_SET_CONTAINER, &container->fd)) {
             ret = vfio_ram_block_discard_disable(container, true);
             if (ret) {
@@ -647,7 +648,6 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     }
 
     container = g_malloc0(sizeof(*container));
-    container->space = space;
     container->fd = fd;
     container->error = NULL;
     container->dirty_pages_supported = false;
@@ -655,7 +655,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     QLIST_INIT(&container->hostwin_list);
     QLIST_INIT(&container->vrdl_list);
     bcontainer = &container->bcontainer;
-    vfio_container_init(bcontainer, ops);
+    vfio_container_init(bcontainer, space, ops);
 
     ret = vfio_init_container(container, group->fd, errp);
     if (ret) {
@@ -773,14 +773,14 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     vfio_kvm_device_add_group(group);
 
     QLIST_INIT(&container->group_list);
-    QLIST_INSERT_HEAD(&space->containers, container, next);
+    QLIST_INSERT_HEAD(&space->containers, bcontainer, next);
 
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
 
     container->listener = vfio_memory_listener;
 
-    memory_listener_register(&container->listener, container->space->as);
+    memory_listener_register(&container->listener, container->bcontainer.space->as);
 
     if (container->error) {
         ret = -1;
@@ -836,7 +836,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
     }
 
     if (QLIST_EMPTY(&container->group_list)) {
-        VFIOAddressSpace *space = container->space;
+        VFIOAddressSpace *space = container->bcontainer.space;
         VFIOHostDMAWindow *hostwin, *next;
 
         QLIST_REMOVE(container, next);
@@ -865,7 +865,7 @@ static VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
     QLIST_FOREACH(group, &vfio_group_list, next) {
         if (group->groupid == groupid) {
             /* Found it.  Now is it already in the right context? */
-            if (group->container->space->as == as) {
+            if (group->container->bcontainer.space->as == as) {
                 return group;
             } else {
                 error_setg(errp, "group %d used in multiple address spaces",
@@ -1063,7 +1063,7 @@ static int vfio_eeh_container_op(VFIOLegacyContainer *container, uint32_t op)
 static VFIOLegacyContainer *vfio_eeh_as_container(AddressSpace *as)
 {
     VFIOAddressSpace *space = vfio_get_address_space(as);
-    VFIOLegacyContainer *container = NULL;
+    VFIOContainer *container = NULL;
 
     if (QLIST_EMPTY(&space->containers)) {
         /* No containers to act on */
@@ -1083,7 +1083,7 @@ static VFIOLegacyContainer *vfio_eeh_as_container(AddressSpace *as)
 
 out:
     vfio_put_address_space(space);
-    return container;
+    return container_of(container, VFIOLegacyContainer, bcontainer);
 }
 
 bool vfio_eeh_as_ok(AddressSpace *as)

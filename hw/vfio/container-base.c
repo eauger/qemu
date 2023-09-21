@@ -59,9 +59,11 @@ int vfio_container_dma_unmap(VFIOContainer *container,
 }
 
 void vfio_container_init(VFIOContainer *container,
+                         VFIOAddressSpace *space,
                          struct VFIOIOMMUBackendOpsClass *ops)
 {
     container->ops = ops;
+    container->space = space;
     QLIST_INIT(&container->giommu_list);
 }
 

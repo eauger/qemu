@@ -80,7 +80,7 @@ int vfio_bitmap_alloc(VFIOBitmap *vbmap, hwaddr size)
 bool vfio_mig_active(void)
 {
     VFIOAddressSpace *space;
-    VFIOLegacyContainer *container;
+    VFIOContainer *container;
     VFIODevice *vbasedev;
 
     if (QLIST_EMPTY(&vfio_address_spaces)) {
@@ -90,7 +90,7 @@ bool vfio_mig_active(void)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
+            while ((vbasedev = vfio_container_dev_iter_next(container,
                                                             vbasedev))) {
                 if (vbasedev->migration_blocker) {
                     return false;
@@ -111,7 +111,7 @@ static Error *multiple_devices_migration_blocker;
 static bool vfio_multiple_devices_migration_is_supported(void)
 {
     VFIOAddressSpace *space;
-    VFIOLegacyContainer *container;
+    VFIOContainer *container;
     VFIODevice *vbasedev;
     unsigned int device_num = 0;
     bool all_support_p2p = true;
@@ -119,7 +119,7 @@ static bool vfio_multiple_devices_migration_is_supported(void)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
+            while ((vbasedev = vfio_container_dev_iter_next(container,
                                                             vbasedev))) {
                 if (vbasedev->migration) {
                     device_num++;
@@ -1007,7 +1007,7 @@ static void vfio_dirty_tracking_init(VFIOLegacyContainer *container,
     dirty.container = container;
 
     memory_listener_register(&dirty.listener,
-                             container->space->as);
+                             container->bcontainer.space->as);
 
     *ranges = dirty.ranges;
 
@@ -1447,13 +1447,13 @@ const MemoryListener vfio_memory_listener = {
 void vfio_reset_handler(void *opaque)
 {
     VFIOAddressSpace *space;
-    VFIOLegacyContainer *container;
+    VFIOContainer *container;
     VFIODevice *vbasedev;
 
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
+            while ((vbasedev = vfio_container_dev_iter_next(container,
                                                             vbasedev))) {
                 if (vbasedev->dev->realized) {
                     vbasedev->ops->vfio_compute_needs_reset(vbasedev);
@@ -1465,7 +1465,7 @@ void vfio_reset_handler(void *opaque)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
+            while ((vbasedev = vfio_container_dev_iter_next(container,
                                                             vbasedev))) {
                 if (vbasedev->dev->realized && vbasedev->needs_reset) {
                     vbasedev->ops->vfio_hot_reset_multi(vbasedev);
