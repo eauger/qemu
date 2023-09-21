@@ -92,11 +92,6 @@ static VFIODevice *vfio_legacy_dev_iter_next(VFIOContainer *bcontainer,
     return QLIST_FIRST(&group->device_list);
 }
 
-bool vfio_viommu_preset(VFIODevice *vbasedev)
-{
-    return vbasedev->group->container->bcontainer.space->as != &address_space_memory;
-}
-
 static int vfio_dma_unmap_bitmap(VFIOLegacyContainer *container,
                                  hwaddr iova, ram_addr_t size,
                                  IOMMUTLBEntry *iotlb)
