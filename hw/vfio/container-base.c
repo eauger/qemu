@@ -107,6 +107,7 @@ void vfio_container_init(VFIOContainer *container,
 {
     container->ops = ops;
     container->space = space;
+    container->error = NULL;
     container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
     QLIST_INIT(&container->giommu_list);

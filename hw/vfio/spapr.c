@@ -83,9 +83,9 @@ static void vfio_prereg_listener_region_add(MemoryListener *listener,
          * can gracefully fail.  Runtime, there's not much we can do other
          * than throw a hardware error.
          */
-        if (!container->initialized) {
-            if (!container->error) {
-                error_setg_errno(&container->error, -ret,
+        if (!container->bcontainer.initialized) {
+            if (!container->bcontainer.error) {
+                error_setg_errno(&container->bcontainer.error, -ret,
                                  "Memory registering failed");
             }
         } else {

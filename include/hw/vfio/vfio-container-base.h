@@ -76,6 +76,9 @@ typedef struct {
 struct VFIOContainer {
     VFIOIOMMUBackendOpsClass *ops;
     VFIOAddressSpace *space;
+    MemoryListener listener;
+    Error *error;
+    bool initialized;
     unsigned long pgsizes;
     unsigned int dma_max_mappings;
     bool dirty_pages_supported;
