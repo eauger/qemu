@@ -39,7 +39,7 @@ static void *vfio_prereg_gpa_to_vaddr(MemoryRegionSection *section, hwaddr gpa)
 static void vfio_prereg_listener_region_add(MemoryListener *listener,
                                             MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer,
+    VFIOLegacyContainer *container = container_of(listener, VFIOLegacyContainer,
                                             prereg_listener);
     const hwaddr gpa = section->offset_within_address_space;
     hwaddr end;
@@ -97,7 +97,7 @@ static void vfio_prereg_listener_region_add(MemoryListener *listener,
 static void vfio_prereg_listener_region_del(MemoryListener *listener,
                                             MemoryRegionSection *section)
 {
-    VFIOContainer *container = container_of(listener, VFIOContainer,
+    VFIOLegacyContainer *container = container_of(listener, VFIOLegacyContainer,
                                             prereg_listener);
     const hwaddr gpa = section->offset_within_address_space;
     hwaddr end;
@@ -141,7 +141,7 @@ const MemoryListener vfio_prereg_listener = {
     .region_del = vfio_prereg_listener_region_del,
 };
 
-int vfio_spapr_create_window(VFIOContainer *container,
+int vfio_spapr_create_window(VFIOLegacyContainer *container,
                              MemoryRegionSection *section,
                              hwaddr *pgsize)
 {
@@ -233,7 +233,7 @@ int vfio_spapr_create_window(VFIOContainer *container,
     return 0;
 }
 
-int vfio_spapr_remove_window(VFIOContainer *container,
+int vfio_spapr_remove_window(VFIOLegacyContainer *container,
                              hwaddr offset_within_address_space)
 {
     struct vfio_iommu_spapr_tce_remove remove = {

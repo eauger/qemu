@@ -76,13 +76,13 @@ typedef struct VFIOMigration {
 
 typedef struct VFIOAddressSpace {
     AddressSpace *as;
-    QLIST_HEAD(, VFIOContainer) containers;
+    QLIST_HEAD(, VFIOLegacyContainer) containers;
     QLIST_ENTRY(VFIOAddressSpace) list;
 } VFIOAddressSpace;
 
 struct VFIOGroup;
 
-typedef struct VFIOContainer {
+typedef struct VFIOLegacyContainer {
     VFIOAddressSpace *space;
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
     MemoryListener listener;
@@ -99,11 +99,11 @@ typedef struct VFIOContainer {
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
-    QLIST_ENTRY(VFIOContainer) next;
-} VFIOContainer;
+    QLIST_ENTRY(VFIOLegacyContainer) next;
+} VFIOLegacyContainer;
 
 typedef struct VFIOGuestIOMMU {
-    VFIOContainer *container;
+    VFIOLegacyContainer *container;
     IOMMUMemoryRegion *iommu_mr;
     hwaddr iommu_offset;
     IOMMUNotifier n;
@@ -111,7 +111,7 @@ typedef struct VFIOGuestIOMMU {
 } VFIOGuestIOMMU;
 
 typedef struct VFIORamDiscardListener {
-    VFIOContainer *container;
+    VFIOLegacyContainer *container;
     MemoryRegion *mr;
     hwaddr offset_within_address_space;
     hwaddr size;
@@ -165,7 +165,7 @@ struct VFIODeviceOps {
 typedef struct VFIOGroup {
     int fd;
     int groupid;
-    VFIOContainer *container;
+    VFIOLegacyContainer *container;
     QLIST_HEAD(, VFIODevice) device_list;
     QLIST_ENTRY(VFIOGroup) next;
     QLIST_ENTRY(VFIOGroup) container_next;
@@ -204,30 +204,30 @@ typedef struct {
     hwaddr pages;
 } VFIOBitmap;
 
-void vfio_host_win_add(VFIOContainer *container,
+void vfio_host_win_add(VFIOLegacyContainer *container,
                        hwaddr min_iova, hwaddr max_iova,
                        uint64_t iova_pgsizes);
-int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
+int vfio_host_win_del(VFIOLegacyContainer *container, hwaddr min_iova,
                       hwaddr max_iova);
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);
-bool vfio_devices_all_running_and_saving(VFIOContainer *container);
+bool vfio_devices_all_running_and_saving(VFIOLegacyContainer *container);
 
 /* container->fd */
-VFIODevice *vfio_container_dev_iter_next(VFIOContainer *container,
+VFIODevice *vfio_container_dev_iter_next(VFIOLegacyContainer *container,
                                          VFIODevice *curr);
-int vfio_dma_unmap(VFIOContainer *container, hwaddr iova,
+int vfio_dma_unmap(VFIOLegacyContainer *container, hwaddr iova,
                    ram_addr_t size, IOMMUTLBEntry *iotlb);
-int vfio_dma_map(VFIOContainer *container, hwaddr iova,
+int vfio_dma_map(VFIOLegacyContainer *container, hwaddr iova,
                  ram_addr_t size, void *vaddr, bool readonly);
-int vfio_set_dirty_page_tracking(VFIOContainer *container, bool start);
-int vfio_query_dirty_bitmap(VFIOContainer *container, VFIOBitmap *vbmap,
+int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start);
+int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
                             hwaddr iova, hwaddr size);
 
-int vfio_container_add_section_window(VFIOContainer *container,
+int vfio_container_add_section_window(VFIOLegacyContainer *container,
                                       MemoryRegionSection *section,
                                       Error **errp);
-void vfio_container_del_section_window(VFIOContainer *container,
+void vfio_container_del_section_window(VFIOLegacyContainer *container,
                                        MemoryRegionSection *section);
 
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
@@ -287,22 +287,22 @@ vfio_get_cap(void *ptr, uint32_t cap_offset, uint16_t id);
 #endif
 extern const MemoryListener vfio_prereg_listener;
 
-int vfio_spapr_create_window(VFIOContainer *container,
+int vfio_spapr_create_window(VFIOLegacyContainer *container,
                              MemoryRegionSection *section,
                              hwaddr *pgsize);
-int vfio_spapr_remove_window(VFIOContainer *container,
+int vfio_spapr_remove_window(VFIOLegacyContainer *container,
                              hwaddr offset_within_address_space);
 
 bool vfio_migration_realize(VFIODevice *vbasedev, Error **errp);
 void vfio_migration_exit(VFIODevice *vbasedev);
 
 int vfio_bitmap_alloc(VFIOBitmap *vbmap, hwaddr size);
-bool vfio_devices_all_running_and_mig_active(VFIOContainer *container);
-bool vfio_devices_all_device_dirty_tracking(VFIOContainer *container);
-int vfio_devices_query_dirty_bitmap(VFIOContainer *container,
+bool vfio_devices_all_running_and_mig_active(VFIOLegacyContainer *container);
+bool vfio_devices_all_device_dirty_tracking(VFIOLegacyContainer *container);
+int vfio_devices_query_dirty_bitmap(VFIOLegacyContainer *container,
                                     VFIOBitmap *vbmap, hwaddr iova,
                                     hwaddr size);
-int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
+int vfio_get_dirty_bitmap(VFIOLegacyContainer *container, uint64_t iova,
                                  uint64_t size, ram_addr_t ram_addr);
 
 #endif /* HW_VFIO_VFIO_COMMON_H */

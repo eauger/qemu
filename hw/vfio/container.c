@@ -42,7 +42,7 @@
 VFIOGroupList vfio_group_list =
     QLIST_HEAD_INITIALIZER(vfio_group_list);
 
-static int vfio_ram_block_discard_disable(VFIOContainer *container, bool state)
+static int vfio_ram_block_discard_disable(VFIOLegacyContainer *container, bool state)
 {
     switch (container->iommu_type) {
     case VFIO_TYPE1v2_IOMMU:
@@ -65,7 +65,7 @@ static int vfio_ram_block_discard_disable(VFIOContainer *container, bool state)
     }
 }
 
-VFIODevice *vfio_container_dev_iter_next(VFIOContainer *container,
+VFIODevice *vfio_container_dev_iter_next(VFIOLegacyContainer *container,
                                          VFIODevice *curr)
 {
     VFIOGroup *group;
@@ -90,7 +90,7 @@ bool vfio_viommu_preset(VFIODevice *vbasedev)
     return vbasedev->group->container->space->as != &address_space_memory;
 }
 
-static int vfio_dma_unmap_bitmap(VFIOContainer *container,
+static int vfio_dma_unmap_bitmap(VFIOLegacyContainer *container,
                                  hwaddr iova, ram_addr_t size,
                                  IOMMUTLBEntry *iotlb)
 {
@@ -145,7 +145,7 @@ unmap_exit:
 /*
  * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
  */
-int vfio_dma_unmap(VFIOContainer *container, hwaddr iova,
+int vfio_dma_unmap(VFIOLegacyContainer *container, hwaddr iova,
                    ram_addr_t size, IOMMUTLBEntry *iotlb)
 {
     struct vfio_iommu_type1_dma_unmap unmap = {
@@ -200,7 +200,7 @@ int vfio_dma_unmap(VFIOContainer *container, hwaddr iova,
     return 0;
 }
 
-int vfio_dma_map(VFIOContainer *container, hwaddr iova,
+int vfio_dma_map(VFIOLegacyContainer *container, hwaddr iova,
                  ram_addr_t size, void *vaddr, bool readonly)
 {
     struct vfio_iommu_type1_dma_map map = {
@@ -230,7 +230,7 @@ int vfio_dma_map(VFIOContainer *container, hwaddr iova,
     return -errno;
 }
 
-int vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
+int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start)
 {
     int ret;
     struct vfio_iommu_type1_dirty_bitmap dirty = {
@@ -257,7 +257,7 @@ int vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
     return ret;
 }
 
-int vfio_query_dirty_bitmap(VFIOContainer *container, VFIOBitmap *vbmap,
+int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
                             hwaddr iova, hwaddr size)
 {
     struct vfio_iommu_type1_dirty_bitmap *dbitmap;
@@ -294,7 +294,7 @@ int vfio_query_dirty_bitmap(VFIOContainer *container, VFIOBitmap *vbmap,
     return ret;
 }
 
-static void vfio_listener_release(VFIOContainer *container)
+static void vfio_listener_release(VFIOLegacyContainer *container)
 {
     memory_listener_unregister(&container->listener);
     if (container->iommu_type == VFIO_SPAPR_TCE_v2_IOMMU) {
@@ -302,7 +302,7 @@ static void vfio_listener_release(VFIOContainer *container)
     }
 }
 
-int vfio_container_add_section_window(VFIOContainer *container,
+int vfio_container_add_section_window(VFIOLegacyContainer *container,
                                       MemoryRegionSection *section,
                                       Error **errp)
 {
@@ -370,7 +370,7 @@ int vfio_container_add_section_window(VFIOContainer *container,
     return 0;
 }
 
-void vfio_container_del_section_window(VFIOContainer *container,
+void vfio_container_del_section_window(VFIOLegacyContainer *container,
                                        MemoryRegionSection *section)
 {
     if (container->iommu_type != VFIO_SPAPR_TCE_v2_IOMMU) {
@@ -432,7 +432,7 @@ static void vfio_kvm_device_del_group(VFIOGroup *group)
 /*
  * vfio_get_iommu_type - selects the richest iommu_type (v2 first)
  */
-static int vfio_get_iommu_type(VFIOContainer *container,
+static int vfio_get_iommu_type(VFIOLegacyContainer *container,
                                Error **errp)
 {
     int iommu_types[] = { VFIO_TYPE1v2_IOMMU, VFIO_TYPE1_IOMMU,
@@ -448,7 +448,7 @@ static int vfio_get_iommu_type(VFIOContainer *container,
     return -EINVAL;
 }
 
-static int vfio_init_container(VFIOContainer *container, int group_fd,
+static int vfio_init_container(VFIOLegacyContainer *container, int group_fd,
                                Error **errp)
 {
     int iommu_type, ret;
@@ -483,7 +483,7 @@ static int vfio_init_container(VFIOContainer *container, int group_fd,
     return 0;
 }
 
-static int vfio_get_iommu_info(VFIOContainer *container,
+static int vfio_get_iommu_info(VFIOLegacyContainer *container,
                                struct vfio_iommu_type1_info **info)
 {
 
@@ -527,7 +527,7 @@ vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id)
     return NULL;
 }
 
-static void vfio_get_iommu_info_migration(VFIOContainer *container,
+static void vfio_get_iommu_info_migration(VFIOLegacyContainer *container,
                                          struct vfio_iommu_type1_info *info)
 {
     struct vfio_info_cap_header *hdr;
@@ -555,7 +555,7 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
 static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
                                   Error **errp)
 {
-    VFIOContainer *container;
+    VFIOLegacyContainer *container;
     int ret, fd;
     VFIOAddressSpace *space;
 
@@ -795,7 +795,7 @@ put_space_exit:
 
 static void vfio_disconnect_container(VFIOGroup *group)
 {
-    VFIOContainer *container = group->container;
+    VFIOLegacyContainer *container = group->container;
 
     QLIST_REMOVE(group, container_next);
     group->container = NULL;
@@ -995,7 +995,7 @@ static void vfio_put_base_device(VFIODevice *vbasedev)
 /*
  * Interfaces for IBM EEH (Enhanced Error Handling)
  */
-static bool vfio_eeh_container_ok(VFIOContainer *container)
+static bool vfio_eeh_container_ok(VFIOLegacyContainer *container)
 {
     /*
      * As of 2016-03-04 (linux-4.5) the host kernel EEH/VFIO
@@ -1023,7 +1023,7 @@ static bool vfio_eeh_container_ok(VFIOContainer *container)
     return true;
 }
 
-static int vfio_eeh_container_op(VFIOContainer *container, uint32_t op)
+static int vfio_eeh_container_op(VFIOLegacyContainer *container, uint32_t op)
 {
     struct vfio_eeh_pe_op pe_op = {
         .argsz = sizeof(pe_op),
@@ -1046,10 +1046,10 @@ static int vfio_eeh_container_op(VFIOContainer *container, uint32_t op)
     return ret;
 }
 
-static VFIOContainer *vfio_eeh_as_container(AddressSpace *as)
+static VFIOLegacyContainer *vfio_eeh_as_container(AddressSpace *as)
 {
     VFIOAddressSpace *space = vfio_get_address_space(as);
-    VFIOContainer *container = NULL;
+    VFIOLegacyContainer *container = NULL;
 
     if (QLIST_EMPTY(&space->containers)) {
         /* No containers to act on */
@@ -1074,14 +1074,14 @@ out:
 
 bool vfio_eeh_as_ok(AddressSpace *as)
 {
-    VFIOContainer *container = vfio_eeh_as_container(as);
+    VFIOLegacyContainer *container = vfio_eeh_as_container(as);
 
     return (container != NULL) && vfio_eeh_container_ok(container);
 }
 
 int vfio_eeh_as_op(AddressSpace *as, uint32_t op)
 {
-    VFIOContainer *container = vfio_eeh_as_container(as);
+    VFIOLegacyContainer *container = vfio_eeh_as_container(as);
 
     if (!container) {
         return -ENODEV;
