@@ -34,6 +34,14 @@ typedef struct VFIOContainer VFIOContainer;
 typedef struct VFIODevice VFIODevice;
 typedef struct VFIOIOMMUBackendOpsClass VFIOIOMMUBackendOpsClass;
 
+typedef struct VFIOGuestIOMMU {
+    VFIOContainer *container;
+    IOMMUMemoryRegion *iommu_mr;
+    hwaddr iommu_offset;
+    IOMMUNotifier n;
+    QLIST_ENTRY(VFIOGuestIOMMU) giommu_next;
+} VFIOGuestIOMMU;
+
 typedef struct {
     unsigned long *bitmap;
     hwaddr size;
@@ -45,6 +53,7 @@ typedef struct {
  */
 struct VFIOContainer {
     VFIOIOMMUBackendOpsClass *ops;
+    QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
 };
 
 int vfio_container_dma_map(VFIOContainer *container,
@@ -53,6 +62,10 @@ int vfio_container_dma_map(VFIOContainer *container,
 int vfio_container_dma_unmap(VFIOContainer *container,
                              hwaddr iova, ram_addr_t size,
                              IOMMUTLBEntry *iotlb);
+
+void vfio_container_init(VFIOContainer *container,
+                         struct VFIOIOMMUBackendOpsClass *ops);
+void vfio_container_destroy(VFIOContainer *container);
 
 #define TYPE_VFIO_IOMMU_BACKEND_LEGACY_OPS "vfio-iommu-backend-legacy-ops"
 #define TYPE_VFIO_IOMMU_BACKEND_OPS "vfio-iommu-backend-ops"
