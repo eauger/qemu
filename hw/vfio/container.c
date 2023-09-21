@@ -555,6 +555,9 @@ static void vfio_get_iommu_info_migration(VFIOLegacyContainer *container,
 static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
                                   Error **errp)
 {
+    VFIOIOMMUBackendOpsClass *ops = VFIO_IOMMU_BACKEND_OPS_CLASS(
+        object_class_by_name(TYPE_VFIO_IOMMU_BACKEND_LEGACY_OPS));
+    VFIOContainer *bcontainer;
     VFIOLegacyContainer *container;
     int ret, fd;
     VFIOAddressSpace *space;
@@ -636,6 +639,8 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
     QLIST_INIT(&container->vrdl_list);
+    bcontainer = &container->bcontainer;
+    bcontainer->ops = ops;
 
     ret = vfio_init_container(container, group->fd, errp);
     if (ret) {
@@ -1154,3 +1159,20 @@ void vfio_detach_device(VFIODevice *vbasedev)
     vfio_put_base_device(vbasedev);
     vfio_put_group(group);
 }
+
+static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
+                                                     void *data) {
+}
+
+static const TypeInfo vfio_iommu_backend_legacy_ops_type = {
+    .name = TYPE_VFIO_IOMMU_BACKEND_LEGACY_OPS,
+
+    .parent = TYPE_VFIO_IOMMU_BACKEND_OPS,
+    .class_init = vfio_iommu_backend_legacy_ops_class_init,
+    .abstract = true,
+};
+static void vfio_iommu_backend_legacy_ops_register_types(void)
+{
+    type_register_static(&vfio_iommu_backend_legacy_ops_type);
+}
+type_init(vfio_iommu_backend_legacy_ops_register_types);
