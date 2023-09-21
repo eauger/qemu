@@ -85,7 +85,6 @@ typedef struct VFIOLegacyContainer {
     unsigned iommu_type;
     Error *error;
     bool initialized;
-    bool dirty_pages_supported;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
@@ -184,11 +183,6 @@ int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);
 bool vfio_devices_all_running_and_saving(VFIOLegacyContainer *container);
-
-/* container->fd */
-int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start);
-int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
-                            hwaddr iova, hwaddr size);
 
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index);

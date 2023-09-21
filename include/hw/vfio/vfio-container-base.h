@@ -66,6 +66,7 @@ typedef struct {
 struct VFIOContainer {
     VFIOIOMMUBackendOpsClass *ops;
     VFIOAddressSpace *space;
+    bool dirty_pages_supported;
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_ENTRY(VFIOContainer) next;
@@ -79,6 +80,11 @@ int vfio_container_dma_map(VFIOContainer *container,
 int vfio_container_dma_unmap(VFIOContainer *container,
                              hwaddr iova, ram_addr_t size,
                              IOMMUTLBEntry *iotlb);
+int vfio_container_set_dirty_page_tracking(VFIOContainer *container,
+                                            bool start);
+int vfio_container_query_dirty_bitmap(VFIOContainer *container,
+                                      VFIOBitmap *vbmap,
+                                      hwaddr iova, hwaddr size);
 int vfio_container_add_section_window(VFIOContainer *container,
                                       MemoryRegionSection *section,
                                       Error **errp);

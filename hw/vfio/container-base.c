@@ -58,6 +58,28 @@ int vfio_container_dma_unmap(VFIOContainer *container,
     return container->ops->dma_unmap(container, iova, size, iotlb);
 }
 
+int vfio_container_set_dirty_page_tracking(VFIOContainer *container,
+                                            bool start)
+{
+    /* Fallback to all pages dirty if dirty page sync isn't supported */
+    if (!container->ops->set_dirty_page_tracking) {
+        return 0;
+    }
+
+    return container->ops->set_dirty_page_tracking(container, start);
+}
+
+int vfio_container_query_dirty_bitmap(VFIOContainer *container,
+                                      VFIOBitmap *vbmap,
+                                      hwaddr iova, hwaddr size)
+{
+    if (!container->ops->query_dirty_bitmap) {
+        return -EINVAL;
+    }
+
+    return container->ops->query_dirty_bitmap(container, vbmap, iova, size);
+}
+
 int vfio_container_add_section_window(VFIOContainer *container,
                                       MemoryRegionSection *section,
                                       Error **errp)
@@ -85,6 +107,7 @@ void vfio_container_init(VFIOContainer *container,
 {
     container->ops = ops;
     container->space = space;
+    container->dirty_pages_supported = false;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
 }

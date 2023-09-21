@@ -170,7 +170,7 @@ static int vfio_legacy_dma_unmap(VFIOContainer *bcontainer, hwaddr iova,
 
     if (iotlb && vfio_devices_all_running_and_mig_active(container)) {
         if (!vfio_devices_all_device_dirty_tracking(container) &&
-            container->dirty_pages_supported) {
+            container->bcontainer.dirty_pages_supported) {
             return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
         }
 
@@ -246,14 +246,18 @@ static int vfio_legacy_dma_map(VFIOContainer *bcontainer, hwaddr iova,
     return -errno;
 }
 
-int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start)
+static int vfio_legacy_set_dirty_page_tracking(VFIOContainer *bcontainer,
+                                               bool start)
 {
+    VFIOLegacyContainer *container = container_of(bcontainer,
+                                                  VFIOLegacyContainer,
+                                                  bcontainer);
     int ret;
     struct vfio_iommu_type1_dirty_bitmap dirty = {
         .argsz = sizeof(dirty),
     };
 
-    if (!container->dirty_pages_supported) {
+    if (!bcontainer->dirty_pages_supported) {
         return 0;
     }
 
@@ -273,9 +277,13 @@ int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start)
     return ret;
 }
 
-int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
-                            hwaddr iova, hwaddr size)
+static int vfio_legacy_query_dirty_bitmap(VFIOContainer *bcontainer,
+                                          VFIOBitmap *vbmap,
+                                          hwaddr iova, hwaddr size)
 {
+    VFIOLegacyContainer *container = container_of(bcontainer,
+                                                  VFIOLegacyContainer,
+                                                  bcontainer);
     struct vfio_iommu_type1_dirty_bitmap *dbitmap;
     struct vfio_iommu_type1_dirty_bitmap_get *range;
     int ret;
@@ -570,7 +578,7 @@ static void vfio_get_iommu_info_migration(VFIOLegacyContainer *container,
      * qemu_real_host_page_size to mark those dirty.
      */
     if (cap_mig->pgsize_bitmap & qemu_real_host_page_size()) {
-        container->dirty_pages_supported = true;
+        container->bcontainer.dirty_pages_supported = true;
         container->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
         container->dirty_pgsizes = cap_mig->pgsize_bitmap;
     }
@@ -658,7 +666,6 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container = g_malloc0(sizeof(*container));
     container->fd = fd;
     container->error = NULL;
-    container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
     QLIST_INIT(&container->vrdl_list);
     bcontainer = &container->bcontainer;
@@ -1183,6 +1190,8 @@ static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
     ops->dev_iter_next = vfio_legacy_dev_iter_next;
     ops->dma_map = vfio_legacy_dma_map;
     ops->dma_unmap = vfio_legacy_dma_unmap;
+    ops->set_dirty_page_tracking = vfio_legacy_set_dirty_page_tracking;
+    ops->query_dirty_bitmap = vfio_legacy_query_dirty_bitmap;
     ops->add_window = vfio_legacy_add_section_window;
     ops->del_window = vfio_legacy_del_section_window;
 }
