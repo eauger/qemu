@@ -182,7 +182,6 @@ int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
                       hwaddr max_iova);
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);
-bool vfio_devices_all_running_and_saving(VFIOLegacyContainer *container);
 
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index);
@@ -251,12 +250,12 @@ bool vfio_migration_realize(VFIODevice *vbasedev, Error **errp);
 void vfio_migration_exit(VFIODevice *vbasedev);
 
 int vfio_bitmap_alloc(VFIOBitmap *vbmap, hwaddr size);
-bool vfio_devices_all_running_and_mig_active(VFIOLegacyContainer *container);
-bool vfio_devices_all_device_dirty_tracking(VFIOLegacyContainer *container);
-int vfio_devices_query_dirty_bitmap(VFIOLegacyContainer *container,
+bool vfio_devices_all_running_and_mig_active(VFIOContainer *container);
+bool vfio_devices_all_device_dirty_tracking(VFIOContainer *container);
+int vfio_devices_query_dirty_bitmap(VFIOContainer *container,
                                     VFIOBitmap *vbmap, hwaddr iova,
                                     hwaddr size);
-int vfio_get_dirty_bitmap(VFIOLegacyContainer *container, uint64_t iova,
+int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
                                  uint64_t size, ram_addr_t ram_addr);
 
 #endif /* HW_VFIO_VFIO_COMMON_H */
