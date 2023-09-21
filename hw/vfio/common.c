@@ -419,12 +419,13 @@ static void vfio_ram_discard_notify_discard(RamDiscardListener *rdl,
 {
     VFIORamDiscardListener *vrdl = container_of(rdl, VFIORamDiscardListener,
                                                 listener);
+    VFIOContainer *container = vrdl->container;
     const hwaddr size = int128_get64(section->size);
     const hwaddr iova = section->offset_within_address_space;
     int ret;
 
     /* Unmap with a single call. */
-    ret = vfio_container_dma_unmap(&vrdl->container->bcontainer, iova, size , NULL);
+    ret = vfio_container_dma_unmap(container, iova, size , NULL);
     if (ret) {
         error_report("%s: vfio_container_dma_unmap() failed: %s", __func__,
                      strerror(-ret));
@@ -436,6 +437,7 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
 {
     VFIORamDiscardListener *vrdl = container_of(rdl, VFIORamDiscardListener,
                                                 listener);
+    VFIOContainer *container = vrdl->container;
     const hwaddr end = section->offset_within_region +
                        int128_get64(section->size);
     hwaddr start, next, iova;
@@ -454,7 +456,7 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
                section->offset_within_address_space;
         vaddr = memory_region_get_ram_ptr(section->mr) + start;
 
-        ret = vfio_container_dma_map(&vrdl->container->bcontainer, iova, next - start,
+        ret = vfio_container_dma_map(container, iova, next - start,
                                      vaddr, section->readonly);
         if (ret) {
             /* Rollback */
@@ -465,7 +467,7 @@ static int vfio_ram_discard_notify_populate(RamDiscardListener *rdl,
     return 0;
 }
 
-static void vfio_register_ram_discard_listener(VFIOLegacyContainer *container,
+static void vfio_register_ram_discard_listener(VFIOContainer *container,
                                                MemoryRegionSection *section)
 {
     RamDiscardManager *rdm = memory_region_get_ram_discard_manager(section->mr);
@@ -539,7 +541,7 @@ static void vfio_register_ram_discard_listener(VFIOLegacyContainer *container,
     }
 }
 
-static void vfio_unregister_ram_discard_listener(VFIOLegacyContainer *container,
+static void vfio_unregister_ram_discard_listener(VFIOContainer *container,
                                                  MemoryRegionSection *section)
 {
     RamDiscardManager *rdm = memory_region_get_ram_discard_manager(section->mr);
@@ -717,7 +719,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
                             iommu_idx);
 
         ret = memory_region_iommu_set_page_size_mask(giommu->iommu_mr,
-                                                     container->pgsizes,
+                                                     container->bcontainer.pgsizes,
                                                      &err);
         if (ret) {
             g_free(giommu);
@@ -744,7 +746,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
      * about changes.
      */
     if (memory_region_has_ram_discard_manager(section->mr)) {
-        vfio_register_ram_discard_listener(container, section);
+        vfio_register_ram_discard_listener(bcontainer, section);
         return;
     }
 
@@ -865,7 +867,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
         pgmask = (1ULL << ctz64(hostwin->iova_pgsizes)) - 1;
         try_unmap = !((iova & pgmask) || (int128_get64(llsize) & pgmask));
     } else if (memory_region_has_ram_discard_manager(section->mr)) {
-        vfio_unregister_ram_discard_listener(container, section);
+        vfio_unregister_ram_discard_listener(bcontainer, section);
         /* Unregistering will trigger an unmap. */
         try_unmap = false;
     }
@@ -1340,10 +1342,10 @@ static int vfio_ram_discard_get_dirty_bitmap(MemoryRegionSection *section,
      * Sync the whole mapped region (spanning multiple individual mappings)
      * in one go.
      */
-    return vfio_get_dirty_bitmap(&vrdl->container->bcontainer, iova, size, ram_addr);
+    return vfio_get_dirty_bitmap(vrdl->container, iova, size, ram_addr);
 }
 
-static int vfio_sync_ram_discard_listener_dirty_bitmap(VFIOLegacyContainer *container,
+static int vfio_sync_ram_discard_listener_dirty_bitmap(VFIOContainer *container,
                                                    MemoryRegionSection *section)
 {
     RamDiscardManager *rdm = memory_region_get_ram_discard_manager(section->mr);
@@ -1403,13 +1405,13 @@ static int vfio_sync_dirty_bitmap(VFIOLegacyContainer *container,
         }
         return 0;
     } else if (memory_region_has_ram_discard_manager(section->mr)) {
-        return vfio_sync_ram_discard_listener_dirty_bitmap(container, section);
+        return vfio_sync_ram_discard_listener_dirty_bitmap(bcontainer, section);
     }
 
     ram_addr = memory_region_get_ram_addr(section->mr) +
                section->offset_within_region;
 
-    return vfio_get_dirty_bitmap(&container->bcontainer,
+    return vfio_get_dirty_bitmap(bcontainer,
                    REAL_HOST_PAGE_ALIGN(section->offset_within_address_space),
                    int128_get64(section->size), ram_addr);
 }

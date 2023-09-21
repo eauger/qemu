@@ -87,22 +87,9 @@ typedef struct VFIOLegacyContainer {
     bool initialized;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
-    unsigned long pgsizes;
-    unsigned int dma_max_mappings;
     QLIST_HEAD(, VFIOGroup) group_list;
-    QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
     QLIST_ENTRY(VFIOLegacyContainer) next;
 } VFIOLegacyContainer;
-
-typedef struct VFIORamDiscardListener {
-    VFIOLegacyContainer *container;
-    MemoryRegion *mr;
-    hwaddr offset_within_address_space;
-    hwaddr size;
-    uint64_t granularity;
-    RamDiscardListener listener;
-    QLIST_ENTRY(VFIORamDiscardListener) next;
-} VFIORamDiscardListener;
 
 typedef struct VFIODeviceOps VFIODeviceOps;
 

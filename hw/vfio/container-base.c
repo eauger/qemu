@@ -108,14 +108,28 @@ void vfio_container_init(VFIOContainer *container,
     container->ops = ops;
     container->space = space;
     container->dirty_pages_supported = false;
+    container->dma_max_mappings = 0;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
+    QLIST_INIT(&container->vrdl_list);
 }
 
 void vfio_container_destroy(VFIOContainer *container)
 {
+    VFIORamDiscardListener *vrdl, *vrdl_tmp;
     VFIOGuestIOMMU *giommu, *tmp;
     VFIOHostDMAWindow *hostwin, *next;
+
+    QLIST_SAFE_REMOVE(container, next);
+
+    QLIST_FOREACH_SAFE(vrdl, &container->vrdl_list, next, vrdl_tmp) {
+        RamDiscardManager *rdm;
+
+        rdm = memory_region_get_ram_discard_manager(vrdl->mr);
+        ram_discard_manager_unregister_listener(rdm, &vrdl->listener);
+        QLIST_REMOVE(vrdl, next);
+        g_free(vrdl);
+    }
 
     QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
         memory_region_unregister_iommu_notifier(
