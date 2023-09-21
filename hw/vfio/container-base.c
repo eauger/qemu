@@ -26,6 +26,28 @@
 #include "qemu/error-report.h"
 #include "hw/vfio/vfio-container-base.h"
 
+int vfio_container_dma_map(VFIOContainer *container,
+                           hwaddr iova, ram_addr_t size,
+                           void *vaddr, bool readonly)
+{
+    if (!container->ops->dma_map) {
+        return -EINVAL;
+    }
+
+    return container->ops->dma_map(container, iova, size, vaddr, readonly);
+}
+
+int vfio_container_dma_unmap(VFIOContainer *container,
+                             hwaddr iova, ram_addr_t size,
+                             IOMMUTLBEntry *iotlb)
+{
+    if (!container->ops->dma_unmap) {
+        return -EINVAL;
+    }
+
+    return container->ops->dma_unmap(container, iova, size, iotlb);
+}
+
 static const TypeInfo vfio_iommu_backend_ops_type_info = {
     .name = TYPE_VFIO_IOMMU_BACKEND_OPS,
     .parent = TYPE_OBJECT,

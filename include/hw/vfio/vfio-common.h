@@ -212,10 +212,6 @@ bool vfio_devices_all_running_and_saving(VFIOLegacyContainer *container);
 /* container->fd */
 VFIODevice *vfio_container_dev_iter_next(VFIOLegacyContainer *container,
                                          VFIODevice *curr);
-int vfio_dma_unmap(VFIOLegacyContainer *container, hwaddr iova,
-                   ram_addr_t size, IOMMUTLBEntry *iotlb);
-int vfio_dma_map(VFIOLegacyContainer *container, hwaddr iova,
-                 ram_addr_t size, void *vaddr, bool readonly);
 int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start);
 int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
                             hwaddr iova, hwaddr size);
