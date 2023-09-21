@@ -82,8 +82,6 @@ typedef struct VFIOLegacyContainer {
     int fd; /* /dev/vfio/vfio, empowered by the attached groups */
     MemoryListener prereg_listener;
     unsigned iommu_type;
-    uint64_t dirty_pgsizes;
-    uint64_t max_dirty_bitmap_size;
     QLIST_HEAD(, VFIOGroup) group_list;
 } VFIOLegacyContainer;
 
