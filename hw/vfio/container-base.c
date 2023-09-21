@@ -58,6 +58,27 @@ int vfio_container_dma_unmap(VFIOContainer *container,
     return container->ops->dma_unmap(container, iova, size, iotlb);
 }
 
+int vfio_container_add_section_window(VFIOContainer *container,
+                                      MemoryRegionSection *section,
+                                      Error **errp)
+{
+    if (!container->ops->add_window) {
+        return 0;
+    }
+
+    return container->ops->add_window(container, section, errp);
+}
+
+void vfio_container_del_section_window(VFIOContainer *container,
+                                       MemoryRegionSection *section)
+{
+    if (!container->ops->del_window) {
+        return;
+    }
+
+    return container->ops->del_window(container, section);
+}
+
 void vfio_container_init(VFIOContainer *container,
                          VFIOAddressSpace *space,
                          struct VFIOIOMMUBackendOpsClass *ops)

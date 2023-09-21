@@ -198,12 +198,6 @@ int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start);
 int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
                             hwaddr iova, hwaddr size);
 
-int vfio_container_add_section_window(VFIOLegacyContainer *container,
-                                      MemoryRegionSection *section,
-                                      Error **errp);
-void vfio_container_del_section_window(VFIOLegacyContainer *container,
-                                       MemoryRegionSection *section);
-
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index);
 void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index);

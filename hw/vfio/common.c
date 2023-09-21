@@ -675,7 +675,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
         return;
     }
 
-    if (vfio_container_add_section_window(container, section, &err)) {
+    if (vfio_container_add_section_window(bcontainer, section, &err)) {
         goto fail;
     }
 
@@ -896,7 +896,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
 
     memory_region_unref(section->mr);
 
-    vfio_container_del_section_window(container, section);
+    vfio_container_del_section_window(&container->bcontainer, section);
 }
 
 typedef struct VFIODirtyRanges {

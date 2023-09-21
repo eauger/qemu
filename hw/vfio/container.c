@@ -318,10 +318,13 @@ static void vfio_listener_release(VFIOLegacyContainer *container)
     }
 }
 
-int vfio_container_add_section_window(VFIOLegacyContainer *container,
-                                      MemoryRegionSection *section,
-                                      Error **errp)
+static int vfio_legacy_add_section_window(VFIOContainer *bcontainer,
+                                         MemoryRegionSection *section,
+                                         Error **errp)
 {
+    VFIOLegacyContainer *container = container_of(bcontainer,
+                                                  VFIOLegacyContainer,
+                                                  bcontainer);
     VFIOHostDMAWindow *hostwin;
     hwaddr pgsize = 0;
     int ret;
@@ -386,9 +389,14 @@ int vfio_container_add_section_window(VFIOLegacyContainer *container,
     return 0;
 }
 
-void vfio_container_del_section_window(VFIOLegacyContainer *container,
-                                       MemoryRegionSection *section)
+static void
+vfio_legacy_del_section_window(VFIOContainer *bcontainer,
+                               MemoryRegionSection *section)
 {
+    VFIOLegacyContainer *container = container_of(bcontainer,
+                                                  VFIOLegacyContainer,
+                                                  bcontainer);
+
     if (container->iommu_type != VFIO_SPAPR_TCE_v2_IOMMU) {
         return;
     }
@@ -1176,6 +1184,8 @@ static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
     ops->dev_iter_next = vfio_legacy_dev_iter_next;
     ops->dma_map = vfio_legacy_dma_map;
     ops->dma_unmap = vfio_legacy_dma_unmap;
+    ops->add_window = vfio_legacy_add_section_window;
+    ops->del_window = vfio_legacy_del_section_window;
 }
 
 static const TypeInfo vfio_iommu_backend_legacy_ops_type = {
