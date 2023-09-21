@@ -1130,8 +1130,8 @@ static int vfio_device_groupid(VFIODevice *vbasedev, Error **errp)
     return groupid;
 }
 
-int vfio_attach_device(char *name, VFIODevice *vbasedev,
-                       AddressSpace *as, Error **errp)
+static int vfio_legacy_attach_device(char *name, VFIODevice *vbasedev,
+                                     AddressSpace *as, Error **errp)
 {
     int groupid = vfio_device_groupid(vbasedev, errp);
     VFIODevice *vbasedev_iter;
@@ -1157,17 +1157,20 @@ int vfio_attach_device(char *name, VFIODevice *vbasedev,
     ret = vfio_get_device(group, name, vbasedev, errp);
     if (ret) {
         vfio_put_group(group);
+        return ret;
     }
+    vbasedev->container = &group->container->bcontainer;
 
     return ret;
 }
 
-void vfio_detach_device(VFIODevice *vbasedev)
+static void vfio_legacy_detach_device(VFIODevice *vbasedev)
 {
     VFIOGroup *group = vbasedev->group;
 
     vfio_put_base_device(vbasedev);
     vfio_put_group(group);
+    vbasedev->container = NULL;
 }
 
 static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
@@ -1177,6 +1180,8 @@ static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
     ops->dev_iter_next = vfio_legacy_dev_iter_next;
     ops->dma_map = vfio_legacy_dma_map;
     ops->dma_unmap = vfio_legacy_dma_unmap;
+    ops->attach_device = vfio_legacy_attach_device;
+    ops->detach_device = vfio_legacy_detach_device;
     ops->set_dirty_page_tracking = vfio_legacy_set_dirty_page_tracking;
     ops->query_dirty_bitmap = vfio_legacy_query_dirty_bitmap;
     ops->add_window = vfio_legacy_add_section_window;

@@ -1590,3 +1590,25 @@ retry:
 
     return info;
 }
+
+int vfio_attach_device(char *name, VFIODevice *vbasedev,
+                       AddressSpace *as, Error **errp)
+{
+    const VFIOIOMMUBackendOpsClass *ops;
+
+    ops = VFIO_IOMMU_BACKEND_OPS_CLASS(
+                  object_class_by_name(TYPE_VFIO_IOMMU_BACKEND_LEGACY_OPS));
+    if (!ops) {
+        error_setg(errp, "VFIO IOMMU Backend not found!");
+        return -ENODEV;
+    }
+    return ops->attach_device(name, vbasedev, as, errp);
+}
+
+void vfio_detach_device(VFIODevice *vbasedev)
+{
+    if (!vbasedev->container) {
+        return;
+    }
+    vbasedev->container->ops->detach_device(vbasedev);
+}
