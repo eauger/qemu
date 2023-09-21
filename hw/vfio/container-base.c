@@ -86,17 +86,25 @@ void vfio_container_init(VFIOContainer *container,
     container->ops = ops;
     container->space = space;
     QLIST_INIT(&container->giommu_list);
+    QLIST_INIT(&container->hostwin_list);
 }
 
 void vfio_container_destroy(VFIOContainer *container)
 {
     VFIOGuestIOMMU *giommu, *tmp;
+    VFIOHostDMAWindow *hostwin, *next;
 
     QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
         memory_region_unregister_iommu_notifier(
                 MEMORY_REGION(giommu->iommu_mr), &giommu->n);
         QLIST_REMOVE(giommu, giommu_next);
         g_free(giommu);
+    }
+
+    QLIST_FOREACH_SAFE(hostwin, &container->hostwin_list, hostwin_next,
+                       next) {
+        QLIST_REMOVE(hostwin, hostwin_next);
+        g_free(hostwin);
     }
 }
 

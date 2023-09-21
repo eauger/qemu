@@ -334,7 +334,7 @@ static int vfio_legacy_add_section_window(VFIOContainer *bcontainer,
     }
 
     /* For now intersections are not allowed, we may relax this later */
-    QLIST_FOREACH(hostwin, &container->hostwin_list, hostwin_next) {
+    QLIST_FOREACH(hostwin, &bcontainer->hostwin_list, hostwin_next) {
         if (ranges_overlap(hostwin->min_iova,
                            hostwin->max_iova - hostwin->min_iova + 1,
                            section->offset_within_address_space,
@@ -356,7 +356,7 @@ static int vfio_legacy_add_section_window(VFIOContainer *bcontainer,
         return ret;
     }
 
-    vfio_host_win_add(container, section->offset_within_address_space,
+    vfio_host_win_add(bcontainer, section->offset_within_address_space,
                       section->offset_within_address_space +
                       int128_get64(section->size) - 1, pgsize);
 #ifdef CONFIG_KVM
@@ -403,7 +403,7 @@ vfio_legacy_del_section_window(VFIOContainer *bcontainer,
 
     vfio_spapr_remove_window(container,
                              section->offset_within_address_space);
-    if (vfio_host_win_del(container,
+    if (vfio_host_win_del(bcontainer,
                           section->offset_within_address_space,
                           section->offset_within_address_space +
                           int128_get64(section->size) - 1) < 0) {
@@ -660,7 +660,6 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container->error = NULL;
     container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
-    QLIST_INIT(&container->hostwin_list);
     QLIST_INIT(&container->vrdl_list);
     bcontainer = &container->bcontainer;
     vfio_container_init(bcontainer, space, ops);
@@ -705,7 +704,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
          * information to get the actual window extent rather than assume
          * a 64-bit IOVA address space.
          */
-        vfio_host_win_add(container, 0, (hwaddr)-1, container->pgsizes);
+        vfio_host_win_add(bcontainer, 0, (hwaddr)-1, container->pgsizes);
 
         break;
     }
@@ -770,7 +769,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
         } else {
             /* The default table uses 4K pages */
             container->pgsizes = 0x1000;
-            vfio_host_win_add(container, info.dma32_window_start,
+            vfio_host_win_add(bcontainer, info.dma32_window_start,
                               info.dma32_window_start +
                               info.dma32_window_size - 1,
                               0x1000);
@@ -850,7 +849,7 @@ static void vfio_disconnect_container(VFIOGroup *group)
         QLIST_REMOVE(container, next);
         vfio_container_destroy(bcontainer);
 
-        QLIST_FOREACH_SAFE(hostwin, &container->hostwin_list, hostwin_next,
+        QLIST_FOREACH_SAFE(hostwin, &bcontainer->hostwin_list, hostwin_next,
                            next) {
             QLIST_REMOVE(hostwin, hostwin_next);
             g_free(hostwin);

@@ -90,7 +90,6 @@ typedef struct VFIOLegacyContainer {
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
     unsigned int dma_max_mappings;
-    QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
     QLIST_HEAD(, VFIORamDiscardListener) vrdl_list;
     QLIST_ENTRY(VFIOLegacyContainer) next;
@@ -105,13 +104,6 @@ typedef struct VFIORamDiscardListener {
     RamDiscardListener listener;
     QLIST_ENTRY(VFIORamDiscardListener) next;
 } VFIORamDiscardListener;
-
-typedef struct VFIOHostDMAWindow {
-    hwaddr min_iova;
-    hwaddr max_iova;
-    uint64_t iova_pgsizes;
-    QLIST_ENTRY(VFIOHostDMAWindow) hostwin_next;
-} VFIOHostDMAWindow;
 
 typedef struct VFIODeviceOps VFIODeviceOps;
 
@@ -184,10 +176,10 @@ typedef struct VFIODisplay {
     } dmabuf;
 } VFIODisplay;
 
-void vfio_host_win_add(VFIOLegacyContainer *container,
+void vfio_host_win_add(VFIOContainer *container,
                        hwaddr min_iova, hwaddr max_iova,
                        uint64_t iova_pgsizes);
-int vfio_host_win_del(VFIOLegacyContainer *container, hwaddr min_iova,
+int vfio_host_win_del(VFIOContainer *container, hwaddr min_iova,
                       hwaddr max_iova);
 VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
 void vfio_put_address_space(VFIOAddressSpace *space);

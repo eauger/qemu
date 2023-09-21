@@ -275,7 +275,7 @@ bool vfio_devices_all_running_and_mig_active(VFIOLegacyContainer *container)
     return true;
 }
 
-void vfio_host_win_add(VFIOLegacyContainer *container, hwaddr min_iova,
+void vfio_host_win_add(VFIOContainer *container, hwaddr min_iova,
                        hwaddr max_iova, uint64_t iova_pgsizes)
 {
     VFIOHostDMAWindow *hostwin;
@@ -297,7 +297,7 @@ void vfio_host_win_add(VFIOLegacyContainer *container, hwaddr min_iova,
     QLIST_INSERT_HEAD(&container->hostwin_list, hostwin, hostwin_next);
 }
 
-int vfio_host_win_del(VFIOLegacyContainer *container,
+int vfio_host_win_del(VFIOContainer *container,
                       hwaddr min_iova, hwaddr max_iova)
 {
     VFIOHostDMAWindow *hostwin;
@@ -562,7 +562,7 @@ static void vfio_unregister_ram_discard_listener(VFIOLegacyContainer *container,
     g_free(vrdl);
 }
 
-static VFIOHostDMAWindow *vfio_find_hostwin(VFIOLegacyContainer *container,
+static VFIOHostDMAWindow *vfio_find_hostwin(VFIOContainer *container,
                                             hwaddr iova, hwaddr end)
 {
     VFIOHostDMAWindow *hostwin;
@@ -679,7 +679,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
         goto fail;
     }
 
-    hostwin = vfio_find_hostwin(container, iova, end);
+    hostwin = vfio_find_hostwin(bcontainer, iova, end);
     if (!hostwin) {
         error_setg(&err, "Container %p can't map guest IOVA region"
                    " 0x%"HWADDR_PRIx"..0x%"HWADDR_PRIx, container, iova, end);
@@ -859,7 +859,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
         hwaddr pgmask;
         VFIOHostDMAWindow *hostwin;
 
-        hostwin = vfio_find_hostwin(container, iova, end);
+        hostwin = vfio_find_hostwin(bcontainer, iova, end);
         assert(hostwin); /* or region_add() would have failed */
 
         pgmask = (1ULL << ctz64(hostwin->iova_pgsizes)) - 1;
