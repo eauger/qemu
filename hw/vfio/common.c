@@ -90,7 +90,7 @@ bool vfio_mig_active(void)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(container,
+            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
                                                             vbasedev))) {
                 if (vbasedev->migration_blocker) {
                     return false;
@@ -119,7 +119,7 @@ static bool vfio_multiple_devices_migration_is_supported(void)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(container,
+            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
                                                             vbasedev))) {
                 if (vbasedev->migration) {
                     device_num++;
@@ -217,7 +217,7 @@ static bool vfio_devices_all_dirty_tracking(VFIOLegacyContainer *container)
         return false;
     }
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         VFIOMigration *migration = vbasedev->migration;
 
         if (!migration) {
@@ -237,7 +237,7 @@ bool vfio_devices_all_device_dirty_tracking(VFIOLegacyContainer *container)
 {
     VFIODevice *vbasedev = NULL;
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         if (!vbasedev->dirty_pages_supported) {
             return false;
         }
@@ -258,7 +258,7 @@ bool vfio_devices_all_running_and_mig_active(VFIOLegacyContainer *container)
         return false;
     }
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         VFIOMigration *migration = vbasedev->migration;
 
         if (!migration) {
@@ -923,7 +923,7 @@ static bool vfio_section_is_vfio_pci(MemoryRegionSection *section,
 
     owner = memory_region_owner(section->mr);
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         if (vbasedev->type != VFIO_DEVICE_TYPE_PCI) {
             continue;
         }
@@ -1030,7 +1030,7 @@ static void vfio_devices_dma_logging_stop(VFIOLegacyContainer *container)
     feature->flags = VFIO_DEVICE_FEATURE_SET |
                      VFIO_DEVICE_FEATURE_DMA_LOGGING_STOP;
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         if (!vbasedev->dirty_tracking) {
             continue;
         }
@@ -1131,7 +1131,7 @@ static int vfio_devices_dma_logging_start(VFIOLegacyContainer *container)
         return -errno;
     }
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         if (vbasedev->dirty_tracking) {
             continue;
         }
@@ -1225,7 +1225,7 @@ int vfio_devices_query_dirty_bitmap(VFIOLegacyContainer *container,
     VFIODevice *vbasedev = NULL;
     int ret;
 
-    while ((vbasedev = vfio_container_dev_iter_next(container, vbasedev))) {
+    while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer, vbasedev))) {
         ret = vfio_device_dma_logging_report(vbasedev, iova, size,
                                              vbmap->bitmap);
         if (ret) {
@@ -1453,7 +1453,7 @@ void vfio_reset_handler(void *opaque)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(container,
+            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
                                                             vbasedev))) {
                 if (vbasedev->dev->realized) {
                     vbasedev->ops->vfio_compute_needs_reset(vbasedev);
@@ -1465,7 +1465,7 @@ void vfio_reset_handler(void *opaque)
     QLIST_FOREACH(space, &vfio_address_spaces, list) {
         QLIST_FOREACH(container, &space->containers, next) {
             vbasedev = NULL;
-            while ((vbasedev = vfio_container_dev_iter_next(container,
+            while ((vbasedev = vfio_container_dev_iter_next(&container->bcontainer,
                                                             vbasedev))) {
                 if (vbasedev->dev->realized && vbasedev->needs_reset) {
                     vbasedev->ops->vfio_hot_reset_multi(vbasedev);

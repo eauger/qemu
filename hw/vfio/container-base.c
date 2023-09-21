@@ -26,6 +26,16 @@
 #include "qemu/error-report.h"
 #include "hw/vfio/vfio-container-base.h"
 
+VFIODevice *vfio_container_dev_iter_next(VFIOContainer *container,
+                                 VFIODevice *curr)
+{
+    if (!container->ops->dev_iter_next) {
+        return NULL;
+    }
+
+    return container->ops->dev_iter_next(container, curr);
+}
+
 int vfio_container_dma_map(VFIOContainer *container,
                            hwaddr iova, ram_addr_t size,
                            void *vaddr, bool readonly)

@@ -56,6 +56,8 @@ struct VFIOContainer {
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
 };
 
+VFIODevice *vfio_container_dev_iter_next(VFIOContainer *container,
+                                 VFIODevice *curr);
 int vfio_container_dma_map(VFIOContainer *container,
                            hwaddr iova, ram_addr_t size,
                            void *vaddr, bool readonly);

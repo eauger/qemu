@@ -65,10 +65,17 @@ static int vfio_ram_block_discard_disable(VFIOLegacyContainer *container, bool s
     }
 }
 
-VFIODevice *vfio_container_dev_iter_next(VFIOLegacyContainer *container,
-                                         VFIODevice *curr)
+static VFIODevice *vfio_legacy_dev_iter_next(VFIOContainer *bcontainer,
+                                             VFIODevice *curr)
 {
     VFIOGroup *group;
+
+    assert(object_class_dynamic_cast(OBJECT_CLASS(bcontainer->ops),
+                                     TYPE_VFIO_IOMMU_BACKEND_LEGACY_OPS));
+
+    VFIOLegacyContainer *container = container_of(bcontainer,
+                                                  VFIOLegacyContainer,
+                                                  bcontainer);
 
     if (!curr) {
         group = QLIST_FIRST(&container->group_list);
@@ -1166,6 +1173,7 @@ static void vfio_iommu_backend_legacy_ops_class_init(ObjectClass *oc,
                                                      void *data) {
     VFIOIOMMUBackendOpsClass *ops = VFIO_IOMMU_BACKEND_OPS_CLASS(oc);
 
+    ops->dev_iter_next = vfio_legacy_dev_iter_next;
     ops->dma_map = vfio_legacy_dma_map;
     ops->dma_unmap = vfio_legacy_dma_unmap;
 }

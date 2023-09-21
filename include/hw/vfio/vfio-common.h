@@ -201,8 +201,6 @@ void vfio_put_address_space(VFIOAddressSpace *space);
 bool vfio_devices_all_running_and_saving(VFIOLegacyContainer *container);
 
 /* container->fd */
-VFIODevice *vfio_container_dev_iter_next(VFIOLegacyContainer *container,
-                                         VFIODevice *curr);
 int vfio_set_dirty_page_tracking(VFIOLegacyContainer *container, bool start);
 int vfio_query_dirty_bitmap(VFIOLegacyContainer *container, VFIOBitmap *vbmap,
                             hwaddr iova, hwaddr size);
