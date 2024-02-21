@@ -31,6 +31,17 @@ OBJECT_DECLARE_SIMPLE_TYPE(VirtIOIOMMU, VIRTIO_IOMMU)
 
 #define TYPE_VIRTIO_IOMMU_MEMORY_REGION "virtio-iommu-memory-region"
 
+typedef enum GranuleMode {
+    GRANULE_MODE_4K,
+    GRANULE_MODE_8K,
+    GRANULE_MODE_16K,
+    GRANULE_MODE_64K,
+    GRANULE_MODE_HOST,
+    GRANULE_MODE__MAX,
+} GranuleMode;
+
+extern const QEnumLookup GranuleMode_lookup;
+
 typedef struct IOMMUDevice {
     void         *viommu;
     PCIBus       *bus;
