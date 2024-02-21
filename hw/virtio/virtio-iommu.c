@@ -44,6 +44,16 @@
 #define VIOMMU_DEFAULT_QUEUE_SIZE 256
 #define VIOMMU_PROBE_SIZE 512
 
+const QEnumLookup GranuleMode_lookup = {
+    .array = (const char *const[]) {
+        [GRANULE_MODE_4K]  = "4K",
+        [GRANULE_MODE_16K] = "16K",
+        [GRANULE_MODE_64K] = "64K",
+        [GRANULE_MODE_HOST] = "host",
+    },
+    .size = GRANULE_MODE__MAX
+};
+
 typedef struct VirtIOIOMMUDomain {
     uint32_t id;
     bool bypass;
