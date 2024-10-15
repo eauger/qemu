@@ -2,8 +2,11 @@ Arm CPU Features
 ================
 
 CPU features are optional features that a CPU of supporting type may
-choose to implement or not.  In QEMU, optional CPU features have
-corresponding boolean CPU proprieties that, when enabled, indicate
+choose to implement or not.  QEMU provides two different mechanisms
+to configure those features:
+
+1. For most CPU models, optional CPU features may have
+corresponding boolean CPU properties that, when enabled, indicate
 that the feature is implemented, and, conversely, when disabled,
 indicate that it is not implemented. An example of an Arm CPU feature
 is the Performance Monitoring Unit (PMU).  CPU types such as the
@@ -30,6 +33,34 @@ running guests in AArch32.
 
 CPU features that are inherently specific to KVM are
 prefixed with "kvm-" and are described in "KVM VCPU Features".
+
+2. Additionally, the ``host`` and ``max`` CPU models on KVM allow
+overwriting a subset of the ID register fields. Not all ID register
+fields are writable: this depends on the host. For those which are
+writable, and for those only, these models expose
+``SYSREG_<IDREG>_<FIELD>`` properties. IDREG and FIELD names are those
+used in the ARM Architecture Reference Manual. QEMU may still omit some
+writable fields that conflict with legacy composite options (for example
+EL3/secure, MTE, SVE, or pauth).
+
+Values set with those properties override the initial values retrieved
+from the vCPU after legacy composite property settings (``sve``,
+``pauth``, ...) have been applied, whether at machine level or at vCPU
+level.
+
+``SYSREG_<IDREG>_<FIELD>`` properties are applied at the end of the chain
+and do not substitute for legacy composite options. In other words, if
+you want to use pauth, you still need to set ``pauth=on``. Indeed legacy
+options do more than exposing a different value for ID registers. They
+may also interact with KVM to prepare the vCPU for this feature (for
+instance at vCPU init time). Whereas ``SYSREG_<IDREG>_<FIELD>`` properties
+only change the final value of the ID register. Inconsistent settings
+between legacy composite options (at machine level or CPU level) which
+impact the vCPU and low-level ``SYSREG_<IDREG>_<FIELD>`` properties are
+rejected. ``SYSREG_<IDREG>_<FIELD>`` properties are essentially used to
+tune the ``host``/``max`` vCPU model so that it allows migration between
+different hardware.
+
 
 CPU Feature Probing
 ===================
@@ -126,13 +157,21 @@ A note about CPU models and KVM
 
 Named CPU models generally do not work with KVM.  There are a few cases
 that do work, e.g. using the named CPU model ``cortex-a57`` with KVM on a
-seattle host, but mostly if KVM is enabled the ``host`` CPU type must be
-used.  This means the guest is provided all the same CPU features as the
-host CPU type has.  And, for this reason, the ``host`` CPU type should
-enable all CPU features that the host has by default.  Indeed it's even
-a bit strange to allow disabling CPU features that the host has when using
-the ``host`` CPU type, but in the absence of CPU models it's the best we can
-do if we want to launch guests without all the host's CPU features enabled.
+seattle host, but mostly if KVM is enabled, the ``host`` CPU model must be
+used.
+
+Using the ``host`` type means the guest is provided all the same CPU
+features as the host CPU type has.  And, for this reason, the ``host``
+CPU type should enable all CPU features that the host has by default.
+
+In case some features need to be tuned for the guest, and the host kernel
+supports it, the ``host`` and ``max`` models can be instructed to change
+individual ID register field values. This is especially useful for
+migration purposes.
+However, this interface will not allow configuring an arbitrary set of
+features; the ID registers must describe a subset of the host's features,
+and all differences to the host's configuration must actually be supported
+by the kernel to be deconfigured.
 
 Enabling KVM also affects the ``query-cpu-model-expansion`` QMP command.  The
 affect is not only limited to specific features, as pointed out in example
@@ -168,6 +207,15 @@ than only enabling the two we want.  This isn't the case, because, as
 disabling many SVE vector lengths would be quite verbose, the ``sve<N>`` CPU
 properties have special semantics (see "SVE CPU Property Parsing
 Semantics").
+
+Additionally, if supported by KVM on the host kernel, the ``host`` and
+``max`` CPU models may be configured via individual ID register field
+properties, for example::
+
+  $ qemu-system-aarch64 -M virt -cpu host,SYSREG_ID_AA64ISAR0_EL1_DP=0x0
+
+This forces ID_AA64ISAR0_EL1 DP field to 0. The same property syntax works
+with ``-cpu max``.
 
 KVM VCPU Features
 =================
@@ -495,3 +543,48 @@ Legal values for ``S`` are 30, 34, 36, and 39; the default is 30.
 
 As with ``x-rme``, the ``x-l0gptsz`` property may be renamed or
 removed in some future QEMU release.
+
+Configuring CPU features via ID register fields
+===============================================
+
+Note that this is currently only supported under KVM, and with the
+``host`` or ``max`` CPU models.
+
+Querying available ID register fields
+-------------------------------------
+
+QEMU will create properties for ID register fields that are reported as
+being writable by the kernel, known to the QEMU instance, and not omitted
+because they conflict with legacy composite options. Therefore, the same
+QEMU binary may expose different properties when run under a different
+kernel.
+
+To find out the available ID register field properties, use the
+``query-cpu-model-expansion`` QMP command::
+
+  (QEMU) query-cpu-model-expansion type=full model={"name":"host"}
+  {"return": {
+   "model": {"name": "host", "props": {
+   "SYSREG_ID_AA64PFR0_EL1_EL2": 1, "SYSREG_ID_AA64ISAR2_EL1_CLRBHB": 0,
+   "SYSREG_CTR_EL0_L1Ip": 3, "SYSREG_CTR_EL0_DminLine": 4,
+   "SYSREG_ID_AA64MMFR0_EL1_BIGEND": 1, "SYSREG_ID_AA64MMFR1_EL1_ECBHB": 0,
+   "SYSREG_ID_AA64MMFR2_EL1_CnP": 1, "SYSREG_ID_DFR0_EL1_PerfMon": 4,
+   "SYSREG_ID_AA64PFR0_EL1_DIT": 0, "SYSREG_ID_AA64MMFR1_EL1_HAFDBS": 2,
+   "SYSREG_ID_AA64ISAR0_EL1_FHM": 0, "SYSREG_ID_AA64ISAR2_EL1_CSSC": 0,
+   "SYSREG_ID_AA64ISAR0_EL1_DP": 1, (...)
+   }}}}
+
+If a certain field in an ID register does not show up in this list, it is
+either not writable with the specific host kernel, unknown to this QEMU
+build, or intentionally not exposed because it overlaps a legacy composite
+option.
+
+A note on compatibility
+-----------------------
+
+A common use case for providing a defined set of ID register values is
+to be able to present a fixed set of features to a guest, often referred
+to as "stable guest ABI". This may take the form of ironing out differences
+between two similar CPUs with the intention of being able to migrate
+between machines with those CPUs, or providing the same CPU across Linux
+kernel updates on the host.
