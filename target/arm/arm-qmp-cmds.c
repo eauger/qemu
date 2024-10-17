@@ -21,6 +21,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/error-report.h"
 #include "qemu/target-info.h"
 #include "hw/core/boards.h"
 #include "kvm_arm.h"
@@ -31,6 +32,7 @@
 #include "system/qmp-cpu.h"
 #include "qapi/qapi-commands-misc-arm.h"
 #include "qobject/qdict.h"
+#include "qobject/qnum.h"
 #include "qom/qom-qobject.h"
 #include "cpu.h"
 
@@ -85,15 +87,24 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
                                   CpuModelInfo *model,
                                   Error **errp)
 {
+    bool use_scratch_vcpu = kvm_enabled() && type == CPU_MODEL_EXPANSION_TYPE_FULL;
     CpuModelExpansionInfo *expansion_info;
+    ObjectPropertyIterator iter;
     const QDict *qdict_in;
+    ObjectProperty *idregprop;
     QDict *qdict_out;
     ObjectClass *oc;
     Object *obj;
+    Visitor *visitor = NULL;
+    Error *err = NULL;
+    bool scratch_created = false;
     const char *name;
+    int fdarray[3];
+    int fd = -1;
     int i;
 
-    if (type != CPU_MODEL_EXPANSION_TYPE_FULL) {
+    /* we support static expansion for host model only */
+    if (type != CPU_MODEL_EXPANSION_TYPE_FULL && strcmp(model->name, "host")) {
         error_setg(errp, "The requested expansion type is not supported");
         return NULL;
     }
@@ -136,9 +147,6 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
     obj = object_new(object_class_get_name(oc));
 
     if (model->props) {
-        Visitor *visitor;
-        Error *err = NULL;
-
         visitor = qobject_input_visitor_new(model->props);
         if (!visit_start_struct(visitor, "model.props", NULL, 0, errp)) {
             visit_free(visitor);
@@ -148,6 +156,8 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
 
         qdict_in = qobject_to(QDict, model->props);
         i = 0;
+
+        /* Test legacy composite option settings */
         while ((name = cpu_model_advertised_features[i++]) != NULL) {
             if (qdict_get(qdict_in, name)) {
                 if (!object_property_set(obj, name, visitor, &err)) {
@@ -157,18 +167,88 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
         }
 
         if (!err) {
-            visit_check_struct(visitor, &err);
-        }
-        if (!err) {
             arm_cpu_finalize_features(ARM_CPU(obj), &err);
+        }
+        if (err) {
+            goto bail_out;
+        }
+
+        /**
+         * Test SYSREG option settings
+         * In full mode, build a scratch vcpu that reflects composite legacy
+         * options
+         */
+        if (use_scratch_vcpu) {
+            Error *local_err = NULL;
+            bool has_virt = object_property_get_bool(OBJECT(current_machine),
+                                                     "virtualization",
+                                                     &local_err);
+
+            if (local_err) {
+                error_free(local_err); /* the machine property does not exist */
+            } else {
+                if (!has_virt && object_property_find(obj, "has_el2")) {
+                    object_property_set_bool(obj, "has_el2", false, NULL);
+                }
+            }
+            fd = kvm_arm_create_init_scratch_vcpu(ARM_CPU(obj), fdarray, errp);
+            if (fd < 0) {
+                goto bail_out;
+            }
+            scratch_created = true;
+        }
+
+        qdict_in = qobject_to(QDict, model->props);
+        for (const QDictEntry *entry = qdict_first(qdict_in);
+                 entry != NULL; entry = qdict_next(qdict_in, entry)) {
+            const char *key = qdict_entry_key(entry);
+            QObject *val_obj = qdict_entry_value(entry);
+            ObjectProperty *prop;
+            Visitor *v;
+            uint64_t val;
+
+            if (!g_str_has_prefix(key, "SYSREG_")) {
+                continue;
+            }
+
+            prop = object_property_find(obj, key);
+
+            /* consume the prop to avoid unexpected parameter */
+            if (!visit_type_uint64(visitor, key, &val, errp)) {
+                goto bail_out;
+            }
+
+            v = qobject_input_visitor_new(val_obj);
+
+            if (!object_property_set(obj, key, v, errp)) {
+                visit_free(v);
+                goto bail_out;
+            }
+
+            if (use_scratch_vcpu && prop) {
+                ARM64SysRegField *field = (ARM64SysRegField *)prop->opaque;
+
+                if (!kvm_idreg_write_scratch_vcpu(ARM_CPU(obj), fd,
+                                                  field, val, errp)) {
+                    visit_free(v);
+                    goto bail_out;
+                }
+            }
+            visit_free(v);
+        }
+
+        visit_check_struct(visitor, &err);
+        if (err) {
+            goto bail_out;
+        }
+
+        if (scratch_created) {
+            kvm_arm_destroy_scratch_host_vcpu(fdarray);
+            scratch_created = false;
         }
         visit_end_struct(visitor, NULL);
         visit_free(visitor);
-        if (err) {
-            object_unref(obj);
-            error_propagate(errp, err);
-            return NULL;
-        }
+        visitor = NULL;
     } else {
         arm_cpu_finalize_features(ARM_CPU(obj), &error_abort);
     }
@@ -192,6 +272,18 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
         }
     }
 
+    object_property_iter_init(&iter, obj);
+
+    while ((idregprop = object_property_iter_next(&iter))) {
+        QObject *value;
+
+        if (!g_str_has_prefix(idregprop->name, "SYSREG_")) {
+            continue;
+        }
+        value = object_property_get_qobject(obj, idregprop->name, &error_abort);
+        qdict_put_obj(qdict_out, idregprop->name, value);
+    }
+
     if (!qdict_size(qdict_out)) {
         qobject_unref(qdict_out);
     } else {
@@ -201,6 +293,20 @@ qmp_query_arm_cpu_model_expansion(CpuModelExpansionType type,
     object_unref(obj);
 
     return expansion_info;
+
+bail_out:
+    if (scratch_created) {
+        kvm_arm_destroy_scratch_host_vcpu(fdarray);
+    }
+    if (visitor) {
+        visit_end_struct(visitor, NULL);
+        visit_free(visitor);
+    }
+    if (err) {
+        error_propagate(errp, err);
+    }
+    object_unref(obj);
+    return NULL;
 }
 
 static void arm_cpu_add_definition(gpointer data, gpointer user_data)
