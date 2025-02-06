@@ -4702,8 +4702,8 @@ static void vtd_reset_exit(Object *obj, ResetType type)
     IntelIOMMUState *s = INTEL_IOMMU_DEVICE(obj);
 
     trace_vtd_reset_exit();
-    vtd_init(s);
     vtd_address_space_refresh_all(s);
+    vtd_init(s);
 }
 
 static AddressSpace *vtd_host_dma_iommu(PCIBus *bus, void *opaque, int devfn)
