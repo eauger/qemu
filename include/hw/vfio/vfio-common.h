@@ -182,6 +182,17 @@ struct VFIODeviceOps {
      * Returns zero to indicate success and negative for error
      */
     int (*vfio_load_config)(VFIODevice *vdev, QEMUFile *f);
+
+    /**
+     * @is_dma_map_allowed
+     *
+     * Returns if the device regions can be dma mapped
+     * It may happen that the device state is not compatible
+     * with such operation
+     *
+     * @vdev: #VFIODevice whose power state needs to be tested
+     */
+    bool (*vfio_is_dma_map_allowed)(VFIODevice *vdev);
 };
 
 typedef struct VFIOGroup {
