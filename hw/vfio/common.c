@@ -555,11 +555,34 @@ static bool vfio_get_section_iova_range(VFIOContainerBase *bcontainer,
     return true;
 }
 
+static VFIOPCIDevice *vfio_section_is_vfio_pci(MemoryRegionSection *section,
+                                     VFIOContainerBase *bcontainer)
+{
+    VFIOPCIDevice *pcidev;
+    VFIODevice *vbasedev;
+    Object *owner;
+
+    owner = memory_region_owner(section->mr);
+
+    QLIST_FOREACH(vbasedev, &bcontainer->device_list, container_next) {
+        if (vbasedev->type != VFIO_DEVICE_TYPE_PCI) {
+            continue;
+        }
+        pcidev = container_of(vbasedev, VFIOPCIDevice, vbasedev);
+        if (OBJECT(pcidev) == owner) {
+            return pcidev;
+        }
+    }
+
+    return NULL;
+}
+
 static void vfio_listener_region_add(MemoryListener *listener,
                                      MemoryRegionSection *section)
 {
     VFIOContainerBase *bcontainer = container_of(listener, VFIOContainerBase,
                                                  listener);
+    VFIOPCIDevice *vdev;
     hwaddr iova, end;
     Int128 llend, llsize;
     void *vaddr;
@@ -629,6 +652,18 @@ static void vfio_listener_region_add(MemoryListener *listener,
     }
 
     /* Here we assume that memory_region_is_ram(section->mr)==true */
+
+    /* skip if the region is a BAR and the power state forbids DMA MAP */
+    vdev = vfio_section_is_vfio_pci(section, bcontainer);
+    if (vdev) {
+        VFIODevice *vbasedev = &vdev->vbasedev;
+        assert(vbasedev->ops->vfio_is_dma_map_allowed);
+        if (!vbasedev->ops->vfio_is_dma_map_allowed(vbasedev)) {
+            trace_vfio_listener_region_add_skip(section->mr->name);
+            return;
+        }
+    }
+
 
     /*
      * For RAM memory regions with a RamDiscardManager, we only want to map the
@@ -803,28 +838,6 @@ typedef struct VFIODirtyRangesListener {
     VFIODirtyRanges ranges;
     MemoryListener listener;
 } VFIODirtyRangesListener;
-
-static bool vfio_section_is_vfio_pci(MemoryRegionSection *section,
-                                     VFIOContainerBase *bcontainer)
-{
-    VFIOPCIDevice *pcidev;
-    VFIODevice *vbasedev;
-    Object *owner;
-
-    owner = memory_region_owner(section->mr);
-
-    QLIST_FOREACH(vbasedev, &bcontainer->device_list, container_next) {
-        if (vbasedev->type != VFIO_DEVICE_TYPE_PCI) {
-            continue;
-        }
-        pcidev = container_of(vbasedev, VFIOPCIDevice, vbasedev);
-        if (OBJECT(pcidev) == owner) {
-            return true;
-        }
-    }
-
-    return false;
-}
 
 static void vfio_dirty_tracking_update_range(VFIODirtyRanges *range,
                                              hwaddr iova, hwaddr end,

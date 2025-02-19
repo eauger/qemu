@@ -2653,6 +2653,26 @@ static int vfio_pci_load_config(VFIODevice *vbasedev, QEMUFile *f)
     return ret;
 }
 
+/*
+ * BARs cannot be dma-mapped if the device is in D3hot state since
+ * linux commit 2b2c651baf1c ("vfio/pci: Invalidate mmaps and block
+ * the access in D3hot power state")
+ */
+static bool vfio_pci_is_dma_map_allowed(VFIODevice *vbasedev)
+{
+    VFIOPCIDevice *vdev = container_of(vbasedev, VFIOPCIDevice, vbasedev);
+    uint16_t pmcsr;
+    uint8_t state;
+
+    pmcsr = vfio_pci_read_config(&vdev->pdev, vdev->pm_cap + PCI_PM_CTRL, 2);
+    state = pmcsr & PCI_PM_CTRL_STATE_MASK;
+    if (state == 3) {
+        return false;
+    }
+    return true;
+}
+
+
 static VFIODeviceOps vfio_pci_ops = {
     .vfio_compute_needs_reset = vfio_pci_compute_needs_reset,
     .vfio_hot_reset_multi = vfio_pci_hot_reset_multi,
@@ -2660,6 +2680,7 @@ static VFIODeviceOps vfio_pci_ops = {
     .vfio_get_object = vfio_pci_get_object,
     .vfio_save_config = vfio_pci_save_config,
     .vfio_load_config = vfio_pci_load_config,
+    .vfio_is_dma_map_allowed = vfio_pci_is_dma_map_allowed,
 };
 
 bool vfio_populate_vga(VFIOPCIDevice *vdev, Error **errp)
@@ -3477,3 +3498,4 @@ static void register_vfio_pci_dev_type(void)
 }
 
 type_init(register_vfio_pci_dev_type)
+
