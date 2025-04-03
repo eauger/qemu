@@ -817,6 +817,7 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     AcpiTable table = { .sig = "DSDT", .rev = 2, .oem_id = vms->oem_id,
                         .oem_table_id = vms->oem_table_id };
     Aml *pci0_scope;
+    bool acpi_pcihp;
 
     acpi_table_begin(&table, table_data);
     dsdt = init_aml_allocator();
@@ -878,6 +879,18 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
         build_append_pcihp_slots(pci0_scope, vms->bus);
     }
 
+    acpi_pcihp = object_property_get_bool(OBJECT(vms->acpi_dev),
+                                          ACPI_PM_PROP_ACPI_PCIHP_BRIDGE, NULL);
+    if (acpi_pcihp) {
+        aml_append(pci0_scope, build_pci_bridge_edsm());
+        build_acpi_pci_hotplug(dsdt, AML_SYSTEM_MEMORY,
+                               memmap[VIRT_ACPI_PCIHP].base);
+        build_append_pcihp_resources(pci0_scope,
+                                     memmap[VIRT_ACPI_PCIHP].base,
+                                     memmap[VIRT_ACPI_PCIHP].size);
+
+        build_append_notification_callback(pci0_scope, vms->bus);
+    }
     aml_append(dsdt, pci0_scope);
 
     /* copy AML table into ACPI tables blob */
