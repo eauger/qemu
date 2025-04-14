@@ -38,6 +38,8 @@
 #define ACPI_PCIHP_SEJ_BASE 0x8
 #define ACPI_PCIHP_BNMR_BASE 0x10
 
+#define ACPI_PCI_HOTPLUG_REG_LEN 0x14
+
 typedef struct AcpiPciHpPciStatus {
     uint32_t up;
     uint32_t down;
