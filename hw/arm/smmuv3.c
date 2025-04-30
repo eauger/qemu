@@ -1991,6 +1991,10 @@ static void smmuv3_class_init(ObjectClass *klass, const void *data)
     SMMUv3Class *c = ARM_SMMUV3_CLASS(klass);
 
     dc->vmsd = &vmstate_smmuv3;
+    dc->bus_type = TYPE_PCIE_BUS;
+    dc->user_creatable = true;
+    dc->hotpluggable = false;
+
     resettable_class_set_parent_phases(rc, NULL, NULL, smmu_reset_exit,
                                        &c->parent_phases);
     device_class_set_parent_realize(dc, smmu_realize,
