@@ -84,6 +84,7 @@ tests_aarch64_system_thorough = [
   'aarch64_aspeed_ast2700',
   'aarch64_aspeed_ast2700fc',
   'aarch64_imx8mp_evk',
+  'aarch64_hotplug_pci',
   'aarch64_raspi3',
   'aarch64_raspi4',
   'aarch64_replay',
