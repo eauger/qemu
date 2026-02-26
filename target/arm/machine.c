@@ -1046,6 +1046,45 @@ static gchar *print_register_name(uint64_t kvm_regidx)
     }
 }
 
+/*
+ * Handle the situation where @kvmidx is on destination but not
+ * in the incoming stream. This never fails the migration.
+ */
+static void handle_cpreg_missing_in_incoming_stream(ARMCPU *cpu, uint64_t kvmidx)
+{
+    g_autofree gchar *name = print_register_name(kvmidx);
+
+    if (!arm_cpu_cpreg_has_mig_tolerance(cpu, kvmidx,
+                                         0, 0, ToleranceNotOnBothEnds)) {
+        warn_report("%s: %s "
+                    "expected by the destination but not in the incoming stream, "
+                     "skip it", __func__, name);
+    } else {
+        trace_tolerate_cpreg_missing_in_incoming_stream(name);
+    }
+}
+
+/*
+ * Handle the situation where @kvmidx is in the incoming
+ * stream but not on destination. This fails the migration if
+ * no cpreg mig tolerance is set for this @kvmidx
+ */
+static bool handle_cpreg_only_in_incoming_stream(ARMCPU *cpu, uint64_t kvmidx)
+{
+    g_autofree gchar *name = print_register_name(kvmidx);
+    bool fail = false;
+
+    if (!arm_cpu_cpreg_has_mig_tolerance(cpu, kvmidx,
+                                        0, 0, ToleranceNotOnBothEnds)) {
+        error_report("%s: %s in the incoming stream but unknown on the "
+                     "destination, fail migration", __func__, name);
+        fail = true;
+    } else {
+        trace_tolerate_cpreg_only_in_incoming_stream(name);
+    }
+    return fail;
+}
+
 static int cpu_post_load(void *opaque, int version_id)
 {
     ARMCPU *cpu = opaque;
@@ -1085,21 +1124,12 @@ static int cpu_post_load(void *opaque, int version_id)
     for (i = 0, v = 0; i < cpu->cpreg_array_len
              && v < cpu->cpreg_vmstate_array_len;) {
         if (cpu->cpreg_vmstate_indexes[v] > cpu->cpreg_indexes[i]) {
-            g_autofree gchar *name = print_register_name(cpu->cpreg_indexes[i]);
-
-            warn_report("%s: %s "
-                        "expected by the destination but not in the incoming stream, "
-                        "skip it", __func__, name);
-            i++;
+            handle_cpreg_missing_in_incoming_stream(cpu, cpu->cpreg_indexes[i++]);
             continue;
         }
         if (cpu->cpreg_vmstate_indexes[v] < cpu->cpreg_indexes[i]) {
-            g_autofree gchar *name = print_register_name(cpu->cpreg_vmstate_indexes[v]);
-
-            error_report("%s: %s in the incoming stream but unknown on the destination, "
-                         "fail migration", __func__, name);
-            v++;
-            fail = true;
+            fail = handle_cpreg_only_in_incoming_stream(cpu,
+                                                        cpu->cpreg_vmstate_indexes[v++]);
             continue;
         }
         /* matching register, copy the value over */
@@ -1113,22 +1143,15 @@ static int cpu_post_load(void *opaque, int version_id)
      * in the input stream
      */
     for ( ; i < cpu->cpreg_array_len; i++) {
-        g_autofree gchar *name = print_register_name(cpu->cpreg_indexes[i]);
-
-        warn_report("%s: %s "
-                    "expected by the destination but not in the incoming stream, "
-                    "skip it", __func__, name);
+        handle_cpreg_missing_in_incoming_stream(cpu, cpu->cpreg_indexes[i]);
     }
     /*
      * if we have reached the end of the cpreg array but there are
      * still regs in the input stream, continue parsing the vmstate array
      */
     for ( ; v < cpu->cpreg_vmstate_array_len; v++) {
-        g_autofree gchar *name = print_register_name(cpu->cpreg_vmstate_indexes[v]);
-
-        error_report("%s: %s in the incoming stream but unknown on the destination, "
-                     "fail migration", __func__, name);
-        fail = true;
+        fail = handle_cpreg_only_in_incoming_stream(cpu,
+                                                    cpu->cpreg_vmstate_indexes[v]);
     }
     if (fail) {
         return -1;
