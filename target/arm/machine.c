@@ -1107,6 +1107,29 @@ static int cpu_post_load(void *opaque, int version_id)
         i++;
         v++;
     }
+    /*
+     * if we have reached the end of the incoming array but there are
+     * still regs in cpreg, continue parsing the regs which are missing
+     * in the input stream
+     */
+    for ( ; i < cpu->cpreg_array_len; i++) {
+        g_autofree gchar *name = print_register_name(cpu->cpreg_indexes[i]);
+
+        warn_report("%s: %s "
+                    "expected by the destination but not in the incoming stream, "
+                    "skip it", __func__, name);
+    }
+    /*
+     * if we have reached the end of the cpreg array but there are
+     * still regs in the input stream, continue parsing the vmstate array
+     */
+    for ( ; v < cpu->cpreg_vmstate_array_len; v++) {
+        g_autofree gchar *name = print_register_name(cpu->cpreg_vmstate_indexes[v]);
+
+        error_report("%s: %s in the incoming stream but unknown on the destination, "
+                     "fail migration", __func__, name);
+        fail = true;
+    }
     if (fail) {
         return -1;
     }
