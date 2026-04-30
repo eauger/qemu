@@ -37,6 +37,8 @@
 #include "hw/core/qdev-properties.h"
 #include "internals.h"
 #include "cpu-features.h"
+#include "cpu-idregs.h"
+#include "trace.h"
 
 /* convert between <register>_IDX and SYS_<register> */
 #define DEF(NAME, OP0, OP1, CRN, CRM, OP2)      \
@@ -798,6 +800,116 @@ static void kvm_arm_set_cpreg_mig_tolerances(ARMCPU *cpu)
     arm_register_cpreg_mig_tolerance(cpu, KVM_REG_ARM_FW_FEAT_BMAP_REG(3),
                                      UINT64_MAX, 0, ToleranceOnlySrcTestValue);
 }
+
+static void set_sysreg_prop(Object *obj, Visitor *v,
+                            const char *name, void *opaque,
+                            Error **errp)
+{
+    error_setg(errp, "%s setter not yet implemented", name);
+}
+
+static void get_sysreg_prop(Object *obj, Visitor *v,
+                            const char *name, void *opaque,
+                            Error **errp)
+{
+    error_setg(errp, "%s getter not yet implemented", name);
+}
+
+/**
+ * aarch64_add_idreg_properties: Add SYSREG_<REG>_<FIELD> properties
+ * for named fields of an ID register
+ *
+ * @obj: CPU object
+ * @reg: Description of the sysreg
+ * @writable_only: if set, add a property only for writable fields,
+ * otherwise, add properties unconditionnally
+ *
+ * Independently on @writable_only, always check the consistency between
+ * writable_mask and register fields description: if a field is writable
+ * make sure all its bits are writable. Also make sure only named fields
+ * are writable.
+ */
+static int
+aarch64_add_one_idreg_properties(Object *obj, ARM64SysReg *reg,
+                                 bool writable_only)
+{
+    uint64_t map = reg->writable_mask;
+    int nb_sysreg_props = 0;
+
+    for (int i = 0; i < reg->fields_count; i++) {
+        ARM64SysRegField *field = &reg->fields[i];
+        int lower = field->shift;
+        int length = field->length;
+        int upper = lower + length - 1;
+        uint64_t field_writable_mask = extract64(map, lower, length);
+        uint64_t field_mask = MAKE_64BIT_MASK(lower, length);
+        char *prop_name;
+
+        /* skip reserved fields, but still account them in writable_mask */
+        if (g_str_equal(field->name, "RES0") ||
+            g_str_equal(field->name, "RES1") ||
+            g_str_equal(field->name, "RAZ")) {
+            map &= ~field_mask;
+            continue;
+        }
+
+        if (field_writable_mask &&
+            field_writable_mask != MAKE_64BIT_MASK(0, length)) {
+            /* only a part of the field is writable, this should never happen */
+            error_report("field %s is not fully writable! (0x%"PRIx64")",
+                         field->name, field_writable_mask);
+        }
+        map = map & ~field_mask;
+
+        if (writable_only && !field_writable_mask) {
+            continue;
+        }
+
+        prop_name = g_strdup_printf("SYSREG_%s_%s", reg->name, field->name);
+        object_property_add(obj, prop_name, "uint64",
+                            get_sysreg_prop, set_sysreg_prop, NULL, field);
+        trace_add_idreg_property(prop_name, lower, upper, field_writable_mask);
+        g_free(prop_name);
+        nb_sysreg_props++;
+    }
+    if (map) {
+        error_report("%s has writable bits which do not match "
+                     "any named field! (0x%" PRIx64")", reg->name, map);
+    }
+    trace_nb_sysreg_props(reg->name, nb_sysreg_props);
+    return 0;
+}
+
+
+/**
+ * aarch64_add_idreg_properties:
+ *
+ * Add SYSREG_<REG>_<FIELD> properties for every IDReg fields
+ *
+ * @cpu: cpu the properties are attached to
+ * @writable_only:  if set, properties are added only if the field is
+ * writable. Otherwise, added unconditionnally
+ */
+static void aarch64_add_idreg_properties(Object *obj, bool writable_only)
+{
+    for (int i = 0; i < NUM_ID_IDX; i++) {
+        ARM64SysReg *sysregdesc = &arm64_id_regs[i];
+
+        if (writable_only && !sysregdesc->writable_mask) {
+            continue;
+        }
+        /*
+         * special case REVIDR_EL1 and AIDR_EL1 which are writable but
+         * do not expose named fields. They will need to be handled
+         * separately
+         */
+        if (!strcmp(sysregdesc->name, "REVIDR_EL1") ||
+            !strcmp(sysregdesc->name, "AIDR_EL1")) {
+            continue;
+        }
+        aarch64_add_one_idreg_properties(obj, sysregdesc, writable_only);
+    }
+}
 #endif
 
 void aarch64_host_initfn(Object *obj)
@@ -815,6 +927,7 @@ void aarch64_host_initfn(Object *obj)
     kvm_arm_set_cpreg_mig_tolerances(cpu);
     kvm_arm_set_cpu_features_from_host(cpu);
     aarch64_add_sve_properties(obj);
+    aarch64_add_idreg_properties(obj, true);
 #elif defined(CONFIG_HVF)
     hvf_arm_set_cpu_features_from_host(cpu);
 #elif defined(CONFIG_WHPX)
