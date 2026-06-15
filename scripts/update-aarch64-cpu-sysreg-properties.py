@@ -78,9 +78,13 @@ def collect_fields(fieldset, bit_offset=0):
 
     # Field Types
     leaf_types = ['Fields.Field', 'Fields.ConstantField',
-                  'Fields.EnumeratedField', 'Fields.Bitfield']
+                  'Fields.EnumeratedField', 'Fields.Bitfield', 'Fields.Reserved']
     if _type in leaf_types:
         field_copy = fieldset.copy()
+
+        if _type == 'Fields.Reserved' and not field_copy.get('name'):
+            field_copy['name'] = fieldset.get('value', 'RES0')
+
         if field_copy.get('rangeset'):
             new_ranges = []
             for r in field_copy['rangeset']:
@@ -92,7 +96,7 @@ def collect_fields(fieldset, bit_offset=0):
         return fields
 
     # Traverse the hierarchy for other cases
-    for key in ['fields', 'values', 'fieldsets']:
+    for key in ['fields', 'values', 'fieldsets', 'constants']:
         for nested in fieldset.get(key, []):
             fields.extend(collect_fields(nested, bit_offset))
 
@@ -210,43 +214,92 @@ def generate_sysreg_properties_from_registers_json(idregs, raw_json_path):
 
         final_output += f"IDREG_START({reg_name})\n"
 
-        unique_fields = {}
+        fieldset_variants = []
+
         for fieldset in register.get('fieldsets', []):
+            current_fieldset_fields = {}
             candidates = collect_fields(fieldset)
+
             for val in candidates:
-                name = (val.get('name') or val.get('label', '')).strip()
-                if not name or "RESERVED" in name.upper():
+                # reserved fields may leave the 'name' empty or set to None and use
+                # value or label instead. Last '' garantees we fall back to an empty
+                # string and prevent the next line from cashing
+                raw_name = val.get('name') or val.get('label') or val.get('value') or ''
+                name = raw_name.strip()
+                if not name:
                     continue
+
+                name_upper = name.upper()
+
+                base_reserved = None
+                for r_type in ["RES0", "RES1", "RAZ", "RAO", "WI", "UNKNOWN"]:
+                    if r_type == name_upper:
+                        # Turn UNKNOWN to RES0
+                        base_reserved = "RES0" if r_type == "UNKNOWN" else r_type
+                        break
+
+                if base_reserved:
+                    name = base_reserved
+                elif "RESERVED" in name_upper:
+                    continue
+
                 for r in val.get('rangeset', []):
                     lsb = int(r.get('start'))
                     width = r.get('width')
                     msb = lsb + int(width) - 1
 
-                    # In json, some idregs may have multiple fielsets, depending
-                    # on some architecture configurations. If this happens, pick
-                    # up a single one with the largest msb (known one is CCSIDR
-                    # which is currently skipped)
-                    if name not in unique_fields or msb > unique_fields[name]['msb']:
-                        # extract enum values if any
+                    if base_reserved:
+                        # reserved fields have same name so append their lsb
+                        # to prevent fields from overriding each other
+                        unique_key = f"{name}_{lsb}"
+                    else:
+                        unique_key = name
+
+                    # within the same fieldset we can have fields with the
+                    # same name and different msbs. Keep the largest.
+                    if unique_key not in current_fieldset_fields or \
+                       msb > current_fieldset_fields[unique_key]['msb']:
                         enums = extract_field_enums(val)
-                        unique_fields[name] = \
-                            {'lsb': lsb, 'msb': msb, 'width': width, 'enums': enums}
+                        current_fieldset_fields[unique_key] = {
+                            'raw_name': name,
+                            'lsb': lsb,
+                            'msb': msb,
+                            'width': width,
+                            'enums': enums
+                        }
+
+            if current_fieldset_fields:
+                fieldset_variants.append(current_fieldset_fields)
+
+        best_fieldset = {}
+        max_total_width = -1
+
+        # among several variants of a fieldset keep the largest one
+        for variant in fieldset_variants:
+            total_width = sum(f['width'] for f in variant.values())
+
+            if total_width > max_total_width:
+                max_total_width = total_width
+                best_fieldset = variant
+
+        unique_fields = best_fieldset
 
         # Sort by decreasing lsbs
         sorted_fields = sorted(unique_fields.items(),
                                key=lambda x: x[1]['lsb'], reverse=True)
 
-        for name, bits in sorted_fields:
+        for unique_key, bits in sorted_fields:
             enums_list = bits.get('enums', [])
+            clean_name = bits.get('raw_name', unique_key)
 
             if enums_list:
                 final_output += format_field_enum(
-                    reg_name, name, bits['lsb'], bits['width'],
+                    reg_name, clean_name, bits['lsb'], bits['width'],
                     merge_enum_ranges(enums_list))
             else:
                 final_output += (
                     f"    IDREG_FIELD({reg_name}, "
-                    f"{name}, {bits['lsb']}, {bits['width']})\n"
+                    f"{clean_name}, {bits['lsb']}, {bits['width']})\n"
                 )
 
         final_output += f"IDREG_END({reg_name})\n"
