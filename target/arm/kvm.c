@@ -1304,6 +1304,27 @@ static int kvm_arm_apply_one_sysreg_prop(ARMCPU *cpu, ARM64SysRegField *field,
     return kvm_arm_override_idreg_field(CPU(cpu)->kvm_fd, field, newfv, errp);
 }
 
+bool kvm_idreg_write_scratch_vcpu(ARMCPU *cpu, int cpufd,
+                                  ARM64SysRegField *field, uint64_t newfv,
+                                  Error **errp)
+{
+    int ret;
+
+    if (!arm_cpu_validate_sysreg_prop(cpu, field, newfv, errp)) {
+        return false;
+    }
+
+    ret = kvm_arm_override_idreg_field(cpufd, field, newfv, errp);
+    if (ret) {
+        return false;
+    }
+
+    cpu->isar.idregs[field->index] =
+        deposit64(cpu->isar.idregs[field->index],
+                  field->shift, field->length, newfv);
+    return true;
+}
+
 static int kvm_arm_apply_sysreg_props(ARMCPU *cpu, Error **errp)
 {
     return arm_cpu_apply_sysreg_props(cpu, kvm_arm_apply_one_sysreg_prop, errp);
