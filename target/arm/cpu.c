@@ -1234,8 +1234,8 @@ static void arm_cpu_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
 
-    cpu->cp_regs = g_hash_table_new_full(g_direct_hash, g_direct_equal,
-                                         NULL, g_free);
+    cpu->cp_regs = g_hash_table_new(g_direct_hash, g_direct_equal);
+    cpu->sysreg_props = g_hash_table_new(g_direct_hash, g_direct_equal);
 
     QLIST_INIT(&cpu->pre_el_change_hooks);
     QLIST_INIT(&cpu->el_change_hooks);
@@ -1735,6 +1735,7 @@ static void arm_cpu_finalizefn(Object *obj)
     ARMCPRegMigTolerance *t, *n;
 
     g_hash_table_destroy(cpu->cp_regs);
+    g_hash_table_destroy(cpu->sysreg_props);
 
     QLIST_FOREACH_SAFE(hook, &cpu->pre_el_change_hooks, node, next) {
         QLIST_REMOVE(hook, node);
