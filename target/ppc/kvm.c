@@ -484,7 +484,7 @@ int kvm_arch_pre_create_vcpu(CPUState *cpu, Error **errp)
     return 0;
 }
 
-int kvm_arch_init_vcpu(CPUState *cs)
+int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *cenv = &cpu->env;
@@ -494,8 +494,8 @@ int kvm_arch_init_vcpu(CPUState *cs)
     ret = kvm_arch_sync_sregs(cpu);
     if (ret) {
         if (ret == -EINVAL) {
-            error_report("Register sync failed... If you're using kvm-hv.ko,"
-                         " only \"-cpu host\" is possible");
+            error_setg(errp, "Register sync failed... If you're using kvm-hv.ko,"
+                       " only \"-cpu host\" is possible");
         }
         return ret;
     }

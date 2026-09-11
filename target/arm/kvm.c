@@ -2215,7 +2215,7 @@ int kvm_arch_pre_create_vcpu(CPUState *cpu, Error **errp)
     return 0;
 }
 
-int kvm_arch_init_vcpu(CPUState *cs)
+int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
 {
     int ret;
     uint64_t mpidr;
@@ -2224,7 +2224,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
     uint64_t psciver;
 
     if (cpu->kvm_target == QEMU_KVM_ARM_TARGET_NONE) {
-        error_report("KVM is not supported for this guest CPU type");
+        error_setg(errp, "KVM is not supported for this guest CPU type");
         return -EINVAL;
     }
 
@@ -2263,16 +2263,19 @@ int kvm_arch_init_vcpu(CPUState *cs)
     /* Do KVM_ARM_VCPU_INIT ioctl */
     ret = kvm_arm_vcpu_init(cpu);
     if (ret) {
+        error_setg(errp, "failed kvm_arm_vcpu_init (%d)", ret);
         return ret;
     }
 
     if (cpu_isar_feature(aa64_sve, cpu)) {
         ret = kvm_arm_sve_set_vls(cpu);
         if (ret) {
+            error_setg(errp, "failed kvm_arm_sve_set_vls (%d)", ret);
             return ret;
         }
         ret = kvm_arm_vcpu_finalize(cpu, KVM_ARM_VCPU_SVE);
         if (ret) {
+            error_setg(errp, "failed kvm_arm_vcpu_finalize (%d)", ret);
             return ret;
         }
     }
@@ -2281,11 +2284,11 @@ int kvm_arch_init_vcpu(CPUState *cs)
         psciver = cpu->psci_version;
         ret = kvm_set_one_reg(cs, KVM_REG_ARM_PSCI_VERSION, &psciver);
         if (ret) {
-            error_report("KVM in this kernel does not support PSCI version %d.%d",
+            error_setg(errp, "KVM in this kernel does not support PSCI version %d.%d",
                          (int) PSCI_VERSION_MAJOR(psciver),
                          (int) PSCI_VERSION_MINOR(psciver));
-            error_printf("Consider setting the kvm-psci-version property on the "
-                         "migration source.\n");
+            error_append_hint(errp, "Consider setting the kvm-psci-version property "
+                              "on the migration source.\n");
             return ret;
         }
     }
@@ -2307,6 +2310,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
      */
     ret = kvm_get_one_reg(cs, ARM64_SYS_REG(ARM_CPU_ID_MPIDR), &mpidr);
     if (ret) {
+        error_setg(errp, "failed retrieving PMIDR value");
         return ret;
     }
     cpu->mp_affinity = mpidr & ARM64_AFFINITY_MASK;

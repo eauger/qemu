@@ -1544,7 +1544,7 @@ int kvm_arch_pre_create_vcpu(CPUState *cpu, Error **errp)
     return 0;
 }
 
-int kvm_arch_init_vcpu(CPUState *cs)
+int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
 {
     int ret = 0;
     RISCVCPU *cpu = RISCV_CPU(cs);
@@ -1554,6 +1554,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
     if (!object_dynamic_cast(OBJECT(cpu), TYPE_RISCV_CPU_HOST)) {
         ret = kvm_vcpu_set_machine_ids(cpu, cs);
         if (ret != 0) {
+            error_setg(errp, "failed setting machine id (%d)", ret);
             return ret;
         }
     }
