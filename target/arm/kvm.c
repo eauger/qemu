@@ -1247,6 +1247,50 @@ bool kvm_arm_cpu_post_load(ARMCPU *cpu)
     return true;
 }
 
+static int G_GNUC_UNUSED
+kvm_arm_override_idreg_field(int fd, ARM64SysRegField *field,
+                             uint64_t newfv, Error **errp)
+{
+    uint64_t current, currentfv, value;
+    struct kvm_one_reg kvm_reg;
+    int index = field->index;
+    int length = field->length;
+    int lower = field->shift;
+    ARM64SysReg *reg;
+    uint64_t kvm_idx;
+    int ret;
+
+    reg = &arm64_id_regs[index];
+
+    kvm_idx = idregs_sysreg_to_kvm_reg(id_register_sysreg[index]);
+
+    ret = read_sys_reg64(fd, &current, kvm_idx);
+    if (ret) {
+        error_setg(errp, "failed to read %s current value", reg->name);
+        return ret;
+    }
+    currentfv = extract64(current, lower, length);
+
+    if (currentfv != newfv) {
+        value = deposit64(current, lower, length, newfv);
+        kvm_reg.id = kvm_idx;
+        kvm_reg.addr = (uintptr_t)&value;
+
+        ret = ioctl(fd, KVM_SET_ONE_REG, &kvm_reg);
+        if (ret) {
+            error_setg(errp,
+                       "ID register field %s.%s: fail to apply new value=0x%"
+                       PRIx64" (current is 0x%"PRIx64"): %m",
+                       reg->name, field->name, newfv, currentfv);
+
+            return ret;
+        }
+    }
+    trace_kvm_arm_override_idreg_field(reg->name, field->name,
+                                       currentfv, newfv);
+    return 0;
+}
+
 void kvm_arm_reset_vcpu(ARMCPU *cpu)
 {
     int ret;
@@ -1259,6 +1303,7 @@ void kvm_arm_reset_vcpu(ARMCPU *cpu)
         fprintf(stderr, "kvm_arm_vcpu_init failed: %s\n", strerror(-ret));
         abort();
     }
+
     if (!write_kvmstate_to_list(cpu)) {
         fprintf(stderr, "write_kvmstate_to_list failed\n");
         abort();
@@ -2204,7 +2249,8 @@ int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
         return ret;
     }
     SET_IDREG(&cpu->isar, MPIDR, mpidr);
-    cpu->mp_affinity = mpidr & ARM64_AFFINITY_MASK;
+
+    cpu->mp_affinity = GET_IDREG(&cpu->isar, MPIDR) & ARM64_AFFINITY_MASK;
 
     return kvm_arm_init_cpreg_list(cpu, errp);
 }
