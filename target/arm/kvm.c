@@ -340,18 +340,79 @@ static ARM64SysRegField *get_field(int i, ARM64SysReg *reg)
     return NULL;
 }
 
+#define MAKE_IDREG_KEY(reg_idx, field_shift) \
+    (((uint64_t)(reg_idx) << 8) | ((uint64_t)(field_shift) & 0xFF))
+
 static void set_sysreg_prop(Object *obj, Visitor *v,
                             const char *name, void *opaque,
                             Error **errp)
 {
-    error_setg(errp, "%s setter not yet implemented", name);
+    ARM64SysRegField *field = (ARM64SysRegField *)opaque;
+    ARMCPU *cpu = ARM_CPU(obj);
+    int index = field->index;
+    int lower = field->shift;
+    int length = field->length;
+    uint64_t key, value;
+
+    if (!visit_type_uint64(v, name, &value, errp)) {
+        return;
+    }
+
+    if (length < 64 && value > ((1 << length) - 1)) {
+        error_setg(errp,
+                   "idreg %s set value (0x%lx) exceeds length of field (%d)!",
+                   name, value, length);
+        return;
+    }
+
+    if (field->arch_vals) {
+        /* this field has some enum values */
+        for (int i = 0; i < field->arch_vals_count; i++) {
+            if (value == field->arch_vals[i]) {
+                goto valid;
+            }
+        }
+        error_setg(errp,
+                   "idreg %s set value (0x%lx) does not match any "
+                   "arch valid enum value", name, value);
+        return;
+    }
+
+valid:
+
+    key = MAKE_IDREG_KEY(index, lower);
+    g_hash_table_insert(cpu->sysreg_props, GUINT_TO_POINTER(key),
+                       GUINT_TO_POINTER(value));
 }
 
 static void get_sysreg_prop(Object *obj, Visitor *v,
                             const char *name, void *opaque,
                             Error **errp)
 {
-    error_setg(errp, "%s getter not yet implemented", name);
+    ARM64SysRegField *field = (ARM64SysRegField *)opaque;
+    ARMCPU *cpu = ARM_CPU(obj);
+    int index = field->index;
+    int lower = field->shift;
+    int length = field->length;
+    gpointer value_ptr;
+    uint64_t value;
+    uint64_t key = MAKE_IDREG_KEY(index, lower);
+    gboolean exists;
+
+    exists = g_hash_table_lookup_extended(cpu->sysreg_props,
+                                          GUINT_TO_POINTER(key), NULL,
+                                          &value_ptr);
+    if (exists) {
+        value = GPOINTER_TO_UINT(value_ptr);
+    } else {
+        uint64_t mask = MAKE_64BIT_MASK(lower, length);
+        uint64_t *idregs = cpu->isar.idregs;
+
+        value = (idregs[index] & mask) >> lower;
+    }
+
+    visit_type_uint64(v, name, &value, errp);
+    trace_get_sysreg_prop(name, value);
 }
 
 /*
