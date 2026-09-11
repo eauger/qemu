@@ -343,6 +343,9 @@ static ARM64SysRegField *get_field(int i, ARM64SysReg *reg)
 #define MAKE_IDREG_KEY(reg_idx, field_shift) \
     (((uint64_t)(reg_idx) << 8) | ((uint64_t)(field_shift) & 0xFF))
 
+#define KEY_TO_REG_IDX(key)     ((uint32_t)(((uint64_t)(key)) >> 8))
+#define KEY_TO_SHIFT(key)       ((uint8_t)(((uint64_t)(key)) & 0xFF))
+
 static void set_sysreg_prop(Object *obj, Visitor *v,
                             const char *name, void *opaque,
                             Error **errp)
@@ -2215,6 +2218,63 @@ int kvm_arch_pre_create_vcpu(CPUState *cpu, Error **errp)
     return 0;
 }
 
+static int kvm_arm_apply_sysreg_props(ARMCPU *cpu, Error **errp)
+{
+    uint64_t *idregs = cpu->isar.idregs;
+    gpointer key_ptr, value_ptr;
+    CPUState *cs = CPU(cpu);
+    GHashTableIter iter;
+
+    g_hash_table_iter_init(&iter, cpu->sysreg_props);
+
+    while (g_hash_table_iter_next(&iter, &key_ptr, &value_ptr)) {
+        uint64_t key = (uint64_t)key_ptr;
+        uint64_t value = (uint64_t)value_ptr;
+        uint32_t reg_idx = KEY_TO_REG_IDX(key);
+        uint8_t lower    = KEY_TO_SHIFT(key);
+        ARM64SysReg *reg = &arm64_id_regs[reg_idx];
+        struct kvm_one_reg kvm_reg;
+        uint64_t current, old, mask;
+        uint64_t kvm_idx;
+        ARM64SysRegField *field = get_field(lower, reg);
+        int length = field->length;
+        uint64_t oldfv;
+        int ret;
+
+        mask = MAKE_64BIT_MASK(lower, length);
+        value = value << lower;
+
+        old = idregs[reg_idx];
+
+        kvm_idx = idregs_sysreg_to_kvm_reg(id_register_sysreg[reg_idx]);
+        ret = read_sys_reg64(cs->kvm_fd, &current, kvm_idx);
+        if (ret) {
+            error_setg(errp, "failed to read the current value of %s",
+                       reg->name);
+            return ret;
+        }
+        oldfv = (current & mask) >> lower;
+
+        idregs[reg_idx] = current & ~mask;
+        idregs[reg_idx] |= value;
+
+        kvm_reg.id = kvm_idx;
+        kvm_reg.addr = (uintptr_t)&idregs[reg_idx];
+
+        ret = ioctl(cs->kvm_fd, KVM_SET_ONE_REG, &kvm_reg);
+        if (ret) {
+            error_setg(errp, "failed to apply new value 0x%"PRIx64" for field %s.%s "
+                       "(previous is 0x%"PRIx64"): %m", idregs[reg_idx],
+                       reg->name, field->name, oldfv);
+            return ret;
+        }
+
+        trace_apply_sysreg_prop(reg->name, field->name, old, current,
+                                mask, value, idregs[reg_idx]);
+    }
+    return 0;
+}
+
 int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
 {
     int ret;
@@ -2314,6 +2374,11 @@ int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
         return ret;
     }
     cpu->mp_affinity = mpidr & ARM64_AFFINITY_MASK;
+
+    ret = kvm_arm_apply_sysreg_props(cpu, errp);
+    if (ret) {
+        return ret;
+    }
 
     return kvm_arm_init_cpreg_list(cpu);
 }
