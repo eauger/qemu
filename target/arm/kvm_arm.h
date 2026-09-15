@@ -119,10 +119,27 @@ bool kvm_arm_create_scratch_host_vcpu(int *fdarray,
                                       struct kvm_vcpu_init *init, Error **errp);
 
 /**
+ * kvm_arm_create_init_scratch_vcpu:
+ * @cpu: ARMCPU whose kvm init features to inherit
+ * @fdarray: array of fds filled as by kvm_arm_create_scratch_host_vcpu
+ *
+ * Create and initialize a scratch vcpu inheriting the features set
+ * on @cpu.
+ *
+ * Return the vcpu fd on success or -1 on failure with a corresponding
+ * Error handle. On success, @fdarray is populated and must be torn down
+ * with kvm_arm_destroy_scratch_host_vcpu().
+ */
+int kvm_arm_create_init_scratch_vcpu(ARMCPU *cpu, int *fdarray, Error **errp);
+
+
+/**
  * kvm_arm_destroy_scratch_host_vcpu:
  * @fdarray: array of fds as set up by kvm_arm_create_scratch_host_vcpu
+ *           or kvm_arm_create_init_scratch_vcpu
  *
- * Tear down the scratch vcpu created by kvm_arm_create_scratch_host_vcpu.
+ * Tear down the scratch vcpu created by kvm_arm_create_scratch_host_vcpu
+ * or kvm_arm_create_init_scratch_vcpu.
  */
 void kvm_arm_destroy_scratch_host_vcpu(int *fdarray);
 
