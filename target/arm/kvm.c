@@ -340,6 +340,107 @@ static ARM64SysRegField *get_field(int i, ARM64SysReg *reg)
     return NULL;
 }
 
+
+/**
+ * kvm_arm_vcpu_validate_sysreg:
+ *
+ * Validate a SYSREG field value is consistent with legacy composite options
+ * Some checks are not implemented because the corresponding sysreg field
+ * is not currently writable. In that case we make sure the field has not
+ * become writable, which would mean the user had the capability to set the
+ * corresponding property.
+ *
+ * return true if consistent. false if it is not, along with an error handle
+ */
+static bool kvm_arm_vcpu_validate_sysreg(ARMCPU *cpu, ARM64SysRegField *field,
+                                         uint64_t value, Error **errp)
+{
+    const char *fieldname = field->name;
+    ARM64SysReg *sysregdesc = &arm64_id_regs[field->index];
+    const char *regname = sysregdesc->name;
+    g_autofree char *propname = g_strdup_printf("SYSREG_%s_%s", regname, fieldname);
+
+    /* virtualization */
+    if (!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL2")) {
+        /* consistency with machine virtualization property */
+        if (cpu->has_el2 && value == 0) {
+            error_setg(errp,
+                "Inconsistent -machine virtualization=on and "
+                "%s=0", propname);
+            return false;
+        } else if (!cpu->has_el2 && value > 0) {
+            error_setg(errp,
+                "Inconsistent -machine virtualization=off and "
+                "%s > 0", propname);
+            return false;
+        }
+    /* secure */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL3") && value > 0) {
+        /* consistency with machine secure property */
+        error_setg(errp, "%s is set but qemu is not ready to support it",
+                   propname);
+        return false;
+    /* MTE */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64PFR1_EL1_MTE")) {
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    /* SVE */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_SVE")) {
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ZFR0_EL1_SVEver")) {
+        if (cpu_isar_feature(aa64_sve, cpu) && value == 0) {
+            error_setg(errp, "sve is set but %s is set to 0", propname);
+            return false;
+        } else if (!cpu_isar_feature(aa64_sve, cpu) && value > 0) {
+            error_setg(errp, "sve is not set but %s is greater than 0",
+                       propname);
+            return false;
+        }
+    /* PAUTH */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ISAR1_EL1_APA")) {
+        /* PAUTH QARMA5 address authentification */
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ISAR1_EL1_API")) {
+        /* PAUTH Impl Defined address authentification */
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ISAR1_EL1_GPA")) {
+        /* QARMA5 generic code authentification */
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ISAR1_EL1_GPI")) {
+        /* QARMA5 generic code authentification */
+        error_setg(errp, "%s is now exposed but qemu is not ready to support it",
+                   propname);
+        return false;
+    /* PMU */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64DFR0_EL1_PMUVer")) {
+        if (cpu->has_pmu && value == 0) {
+            error_setg(errp, "%s is 0 whereas pmu is set", propname);
+            return false;
+        } else if (!cpu->has_pmu && value) {
+            error_setg(errp, "%s is non null whereas pmu is unset", propname);
+            return false;
+        }
+    /* aarch64 false */
+    } else if (!arm_feature(&cpu->env, ARM_FEATURE_AARCH64)) {
+        if ((!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL0") ||
+             !strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL1") ||
+             !strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL2")) && value < 2)
+            error_setg(errp, "%s is < 2 while aarch64 is set to off",
+                       propname);
+            return false;
+    }
+    return true;
+}
+
 #define MAKE_IDREG_KEY(reg_idx, field_shift) \
     (((uint64_t)(reg_idx) << 8) | ((uint64_t)(field_shift) & 0xFF))
 
@@ -2240,6 +2341,10 @@ static int kvm_arm_apply_sysreg_props(ARMCPU *cpu, Error **errp)
         int length = field->length;
         uint64_t oldfv;
         int ret;
+
+        if (!kvm_arm_vcpu_validate_sysreg(cpu, field, value, errp)) {
+            return -1;
+        }
 
         mask = MAKE_64BIT_MASK(lower, length);
         value = value << lower;
