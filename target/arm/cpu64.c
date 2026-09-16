@@ -822,6 +822,63 @@ static ARM64SysRegField *arm_sysreg_get_field(ARM64SysReg *reg, int bit)
 }
 
 /**
+ * arm_cpu_validate_sysreg_prop:
+ *
+ * Validate a SYSREG field value against legacy composite options
+ * (virtualization, pmu, sve, aarch64, ...). Some other fields are known
+ * to conflict but they are not writable yet. For those we just skip them
+ * in aarch64_add_one_idreg_properties() in the hypothesis their property
+ * shows up.
+ */
+bool arm_cpu_validate_sysreg_prop(ARMCPU *cpu, ARM64SysRegField *field,
+                                  uint64_t value, Error **errp)
+{
+    ARM64SysReg *sysregdesc = &arm64_id_regs[field->index];
+    g_autofree char *propname =
+        g_strdup_printf("SYSREG_%s_%s", sysregdesc->name, field->name);
+
+    /* virtualization */
+    if (!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL2")) {
+        if (cpu->has_el2 && value == 0) {
+            error_setg(errp,
+                       "Inconsistent -machine virtualization=on and %s=0",
+                       propname);
+            return false;
+        } else if (!cpu->has_el2 && value > 0) {
+            error_setg(errp,
+                       "Inconsistent -machine virtualization=off and %s > 0",
+                       propname);
+            return false;
+        }
+    } else if (!strcmp(propname, "SYSREG_ID_AA64ZFR0_EL1_SVEver")) {
+        if (!cpu_isar_feature(aa64_sve, cpu) && value > 0) {
+            error_setg(errp, "sve is not set but %s is greater than 0",
+                       propname);
+            return false;
+        }
+    /* PMU */
+    } else if (!strcmp(propname, "SYSREG_ID_AA64DFR0_EL1_PMUVer")) {
+        if (cpu->has_pmu && value == 0) {
+            error_setg(errp, "%s is 0 whereas pmu is set", propname);
+            return false;
+        } else if (!cpu->has_pmu && value) {
+            error_setg(errp, "%s is non null whereas pmu is unset", propname);
+            return false;
+        }
+    /* aarch64=off */
+    } else if (!arm_feature(&cpu->env, ARM_FEATURE_AARCH64)) {
+        if ((!strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL0") ||
+             !strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL1") ||
+             !strcmp(propname, "SYSREG_ID_AA64PFR0_EL1_EL2")) && value < 2) {
+            error_setg(errp, "%s is < 2 while aarch64 is set to off",
+                       propname);
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * arm_cpu_apply_sysreg_props:
  *
  * Iterate over all SYSREG_* property overrides, and apply them on the vcpu
@@ -847,6 +904,10 @@ int arm_cpu_apply_sysreg_props(ARMCPU *cpu, ARMSysregPropApplyFn accel_apply_fn,
         if (!field) {
             error_setg(errp, "SYSREG property key 0x%" PRIx64
                        " does not match any field of %s", key, reg->name);
+            return -EINVAL;
+        }
+
+        if (!arm_cpu_validate_sysreg_prop(cpu, field, newfv, errp)) {
             return -EINVAL;
         }
 
@@ -934,6 +995,35 @@ static void get_sysreg_prop(Object *obj, Visitor *v,
     trace_get_sysreg_prop(name, value);
 }
 
+/*
+ * SYSREG properties that are not exposed yet because the fields
+ * are not yet writable and which are known to conflict with legacy
+ * composite options (EL3, MTE, SVE, pauth, ...). In case the
+ * associated fields would become exposed, we skip them when registering
+ * the properties.
+ */
+static const char * const aarch64_sysreg_prop_skip_list[] = {
+    "SYSREG_ID_AA64PFR0_EL1_EL3",
+    "SYSREG_ID_AA64PFR1_EL1_MTE",
+    "SYSREG_ID_AA64PFR0_EL1_SVE",
+    "SYSREG_ID_AA64ISAR1_EL1_APA",
+    "SYSREG_ID_AA64ISAR1_EL1_API",
+    "SYSREG_ID_AA64ISAR1_EL1_GPA",
+    "SYSREG_ID_AA64ISAR1_EL1_GPI",
+    "SYSREG_ID_AA64ISAR2_EL1_APA3",
+    "SYSREG_ID_AA64ISAR2_EL1_GPA3",
+};
+
+static bool aarch64_sysreg_prop_skipped(const char *prop_name)
+{
+    for (int i = 0; i < ARRAY_SIZE(aarch64_sysreg_prop_skip_list); i++) {
+        if (g_str_equal(prop_name, aarch64_sysreg_prop_skip_list[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * aarch64_add_idreg_properties: Add SYSREG_<REG>_<FIELD> properties
  * for named fields of an ID register
@@ -985,6 +1075,10 @@ aarch64_add_one_idreg_properties(Object *obj, ARM64SysReg *reg,
         }
 
         prop_name = g_strdup_printf("SYSREG_%s_%s", reg->name, field->name);
+        if (aarch64_sysreg_prop_skipped(prop_name)) {
+            g_free(prop_name);
+            continue;
+        }
         object_property_add(obj, prop_name, "uint64",
                             get_sysreg_prop, set_sysreg_prop, NULL, field);
         trace_add_idreg_property(prop_name, lower, upper, field_writable_mask);

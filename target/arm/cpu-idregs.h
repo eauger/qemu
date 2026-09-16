@@ -56,4 +56,21 @@ typedef int (*ARMSysregPropApplyFn)(ARMCPU *cpu, ARM64SysRegField *field,
 int arm_cpu_apply_sysreg_props(ARMCPU *cpu, ARMSysregPropApplyFn accel_apply_fn,
                                Error **errp);
 
+/**
+ * arm_cpu_validate_sysreg_prop:
+ *
+ * accelerator agnostic validation of a field value (especially regarding
+ * the consistency with legacy composite options such as virtualization, pmu,
+ * sve ...)
+ *
+ * @cpu: vcpu the field value is validated against
+ * @field: field the value is applied to
+ * @value: field value to be validated
+ * @errp: error handle set if validation fails
+ *
+ * returns true if validation succeeds
+ */
+bool arm_cpu_validate_sysreg_prop(ARMCPU *cpu, ARM64SysRegField *field,
+                                  uint64_t value, Error **errp);
+
 #endif
