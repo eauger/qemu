@@ -1247,7 +1247,7 @@ bool kvm_arm_cpu_post_load(ARMCPU *cpu)
     return true;
 }
 
-static int G_GNUC_UNUSED
+static int
 kvm_arm_override_idreg_field(int fd, ARM64SysRegField *field,
                              uint64_t newfv, Error **errp)
 {
@@ -1291,6 +1291,17 @@ kvm_arm_override_idreg_field(int fd, ARM64SysRegField *field,
     return 0;
 }
 
+static int kvm_arm_apply_one_sysreg_prop(ARMCPU *cpu, ARM64SysRegField *field,
+                                         uint64_t newfv, Error **errp)
+{
+    return kvm_arm_override_idreg_field(CPU(cpu)->kvm_fd, field, newfv, errp);
+}
+
+static int kvm_arm_apply_sysreg_props(ARMCPU *cpu, Error **errp)
+{
+    return arm_cpu_apply_sysreg_props(cpu, kvm_arm_apply_one_sysreg_prop, errp);
+}
+
 void kvm_arm_reset_vcpu(ARMCPU *cpu)
 {
     int ret;
@@ -1303,6 +1314,8 @@ void kvm_arm_reset_vcpu(ARMCPU *cpu)
         fprintf(stderr, "kvm_arm_vcpu_init failed: %s\n", strerror(-ret));
         abort();
     }
+
+    kvm_arm_apply_sysreg_props(cpu, &error_abort);
 
     if (!write_kvmstate_to_list(cpu)) {
         fprintf(stderr, "write_kvmstate_to_list failed\n");
@@ -2249,6 +2262,11 @@ int kvm_arch_init_vcpu(CPUState *cs, Error **errp)
         return ret;
     }
     SET_IDREG(&cpu->isar, MPIDR, mpidr);
+
+    ret = kvm_arm_apply_sysreg_props(cpu, errp);
+    if (ret) {
+        return ret;
+    }
 
     cpu->mp_affinity = GET_IDREG(&cpu->isar, MPIDR) & ARM64_AFFINITY_MASK;
 
