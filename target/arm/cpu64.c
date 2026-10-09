@@ -883,10 +883,11 @@ static void set_sysreg_prop(Object *obj, Visitor *v,
         return;
     }
 
-    if (field->arch_vals) {
-        /* this field has some enum values */
-        for (int i = 0; i < field->arch_vals_count; i++) {
-            if (value == field->arch_vals[i]) {
+    if (field->arch_value_ranges) {
+        for (uint32_t i = 0; i < field->arch_value_ranges_count; i++) {
+            const ARM64SysRegArchValueRange *r = &field->arch_value_ranges[i];
+
+            if (value >= r->lo && value <= r->hi) {
                 goto valid;
             }
         }
