@@ -803,6 +803,63 @@ static void kvm_arm_set_cpreg_mig_tolerances(ARMCPU *cpu)
 
 #define IDREG_FIELD_KEY(reg_idx, field_shift) \
     (((uint64_t)(reg_idx) << 8) | ((uint64_t)(field_shift) & 0xFF))
+#define IDREG_FIELD_KEY_TO_REG_IDX(key) \
+    ((uint32_t)(((uint64_t)(key)) >> 8))
+#define IDREG_FIELD_KEY_TO_SHIFT(key) \
+    ((uint8_t)(((uint64_t)(key)) & 0xFF))
+
+static ARM64SysRegField *arm_sysreg_get_field(ARM64SysReg *reg, int bit)
+{
+    for (int f = 0; f < reg->fields_count; f++) {
+        ARM64SysRegField *field = &reg->fields[f];
+        int upper = field->shift + field->length - 1;
+
+        if (bit >= field->shift && bit <= upper) {
+            return field;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * arm_cpu_apply_sysreg_props:
+ *
+ * Iterate over all SYSREG_* property overrides, and apply them on the vcpu
+ * using the accelerataor specific @accel_apply_fn callback.
+ */
+int arm_cpu_apply_sysreg_props(ARMCPU *cpu, ARMSysregPropApplyFn accel_apply_fn,
+                               Error **errp)
+{
+    gpointer key_ptr, value_ptr;
+    GHashTableIter iter;
+
+    g_hash_table_iter_init(&iter, cpu->sysreg_props);
+
+    while (g_hash_table_iter_next(&iter, &key_ptr, &value_ptr)) {
+        uint64_t key = (uint64_t)key_ptr;
+        uint64_t newfv = (uint64_t)value_ptr;
+        uint32_t reg_idx = IDREG_FIELD_KEY_TO_REG_IDX(key);
+        uint8_t lower = IDREG_FIELD_KEY_TO_SHIFT(key);
+        ARM64SysReg *reg = &arm64_id_regs[reg_idx];
+        ARM64SysRegField *field = arm_sysreg_get_field(reg, lower);
+        int ret;
+
+        if (!field) {
+            error_setg(errp, "SYSREG property key 0x%" PRIx64
+                       " does not match any field of %s", key, reg->name);
+            return -EINVAL;
+        }
+
+        ret = accel_apply_fn(cpu, field, newfv, errp);
+        if (ret) {
+            return ret;
+        }
+        cpu->isar.idregs[field->index] =
+            deposit64(cpu->isar.idregs[field->index],
+                      field->shift, field->length, newfv);
+    }
+    return 0;
+}
 
 static void set_sysreg_prop(Object *obj, Visitor *v,
                             const char *name, void *opaque,

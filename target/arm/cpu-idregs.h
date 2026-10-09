@@ -38,4 +38,22 @@ typedef struct ARM64SysReg {
  */
 extern ARM64SysReg arm64_id_regs[NUM_ID_IDX];
 
+/* accelerator specific callback used to apply a new field value on a vcpu */
+typedef int (*ARMSysregPropApplyFn)(ARMCPU *cpu, ARM64SysRegField *field,
+                                    uint64_t newfv, Error **errp);
+
+/**
+ * arm_cpu_apply_sysreg_props:
+ *
+ * Apply all SYSREG prop values
+ * @cpu:  vcpu on which the values are applied
+ * @accel_apply_fn: acceleration specific callback used to override
+ *                  a single field value
+ * @errp: error handle
+ *
+ * return 0 on sucess or negative value with errp set on failure
+ */
+int arm_cpu_apply_sysreg_props(ARMCPU *cpu, ARMSysregPropApplyFn accel_apply_fn,
+                               Error **errp);
+
 #endif
