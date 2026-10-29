@@ -1838,12 +1838,13 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
      * then it's possible that might have failed in the initfn, but
      * this is the first point where we can report it.
      */
-    if (cpu->host_cpu_probe_failed) {
+    if (cpu->host_cpu_probe_err) {
         if (!kvm_enabled() && !hvf_enabled() && !whpx_enabled()) {
-            error_setg(errp, "The 'host' CPU type can only be used with KVM, HVF or WHPX");
-        } else {
-            error_setg(errp, "Failed to retrieve host CPU features");
+            error_append_hint(&cpu->host_cpu_probe_err,
+                              "The 'host' CPU type can only be used with KVM, HVF or WHPX\n");
         }
+        error_propagate(errp, cpu->host_cpu_probe_err);
+        cpu->host_cpu_probe_err = NULL;
         return;
     }
 
